@@ -1,0 +1,63 @@
+From 39b266a74248d001f5c2070602c9163181a9ea8c Mon Sep 17 00:00:00 2001
+From: Andrei Smirnov <andrei.smirnov@imd-tec.com>
+Date: Wed, 21 Oct 2026 11:58:18 +0100
+Subject: [PATCH] clk: renesas: r9a09g056: add ISP clocks and resets
+
+Add the Mali-C55 ISP module clocks, resets and the PLLVDO ISP divider to
+RZ/V2N. The register positions are the same as on r9a09g057 and were not
+checked against the RZ/V2N hardware manual.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/clk/renesas/r9a09g056-cpg.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/drivers/clk/renesas/r9a09g056-cpg.c b/drivers/clk/renesas/r9a09g056-cpg.c
+index ca6129245a4d..d4b0a9299fea 100644
+--- a/drivers/clk/renesas/r9a09g056-cpg.c
++++ b/drivers/clk/renesas/r9a09g056-cpg.c
+@@ -75,6 +75,7 @@ enum clk_ids {
+ 	CLK_PLLVDO_CRU0,
+ 	CLK_PLLVDO_CRU1,
+ 	CLK_PLLVDO_ISU,
++	CLK_PLLVDO_ISP,
+ 	CLK_PLLETH_DIV_250_FIX,
+ 	CLK_PLLETH_DIV_125_FIX,
+ 	CLK_CSDIV_PLLETH_GBE0,
+@@ -238,6 +239,7 @@ static const struct cpg_core_clk r9a09g056_core_clks[] = {
+ 	DEF_DDIV(".pllvdo_cru0", CLK_PLLVDO_CRU0, CLK_PLLVDO, CDDIV3_DIVCTL3, dtable_2_4),
+ 	DEF_DDIV(".pllvdo_cru1", CLK_PLLVDO_CRU1, CLK_PLLVDO, CDDIV4_DIVCTL0, dtable_2_4),
+ 	DEF_DDIV(".pllvdo_isu", CLK_PLLVDO_ISU, CLK_PLLVDO, CDDIV3_DIVCTL0, dtable_2_64),
++	DEF_DDIV(".pllvdo_isp", CLK_PLLVDO_ISP, CLK_PLLVDO, CDDIV2_DIVCTL3, dtable_2_64),
+ 
+ 	DEF_FIXED(".plleth_250_fix", CLK_PLLETH_DIV_250_FIX, CLK_PLLETH, 1, 4),
+ 	DEF_FIXED(".plleth_125_fix", CLK_PLLETH_DIV_125_FIX, CLK_PLLETH_DIV_250_FIX, 1, 2),
+@@ -594,6 +596,14 @@ static const struct rzv2h_mod_clk r9a09g056_mod_clks[] __initconst = {
+ 						BUS_MSTOP(9, BIT(5))),
+ 	DEF_MOD("cru_1_pclk",			CLK_PLLDTY_DIV16, 13, 7, 6, 23,
+ 						BUS_MSTOP(9, BIT(5))),
++	DEF_MOD("isp_reg_aclk",		CLK_PLLDTY_ACPU_DIV2, 14, 2, 7, 2,
++						BUS_MSTOP(9, BIT(9))),
++	DEF_MOD("isp_pclk",			CLK_PLLDTY_DIV16, 14, 3, 7, 3,
++						BUS_MSTOP(9, BIT(8))),
++	DEF_MOD("isp_vin_aclk",		CLK_PLLDTY_ACPU_DIV2, 14, 4, 7, 4,
++						BUS_MSTOP(9, BIT(9))),
++	DEF_MOD("isp_sclk",			CLK_PLLVDO_ISP, 14, 5, 7, 5,
++						BUS_MSTOP_NONE),
+ 	DEF_MOD("isu_0_aclk",			CLK_PLLVDO_ISU, 14, 6, 7, 6,
+ 						BUS_MSTOP(10, BIT(0))),
+ 	DEF_MOD("isu_0_pclk",			CLK_PLLDTY_DIV16, 14, 7, 7, 7,
+@@ -806,6 +816,10 @@ static const struct rzv2h_reset r9a09g056_resets[] __initconst = {
+ 	DEF_RST(12, 8, 5, 25),		/* CRU_1_PRESETN */
+ 	DEF_RST(12, 9, 5, 26),		/* CRU_1_ARESETN */
+ 	DEF_RST(12, 10, 5, 27),		/* CRU_1_S_RESETN */
++	DEF_RST(13, 1, 6, 2),		/* ISP_0_VIN_ARESETN */
++	DEF_RST(13, 2, 6, 3),		/* ISP_0_REG_ARESETN */
++	DEF_RST(13, 3, 6, 4),		/* ISP_0_ISP_SRESETN */
++	DEF_RST(13, 4, 6, 5),		/* ISP_0_PRESETN */
+ 	DEF_RST(13, 5, 6, 6),		/* ISU_0_ARESETN */
+ 	DEF_RST(13, 6, 6, 7),		/* ISU_0_PRESETN */
+ 	DEF_RST(13, 7, 6, 8),		/* DSI_0_PRESETN */
+-- 
+2.43.0
+

@@ -1,0 +1,12 @@
+
+[Unit]
+Description=ARM Mali ISP service
+After=network.target graphical.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/mali_iv021_isp.elf 
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

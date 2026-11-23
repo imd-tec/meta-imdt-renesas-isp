@@ -1,0 +1,289 @@
+From 177d9c9efdad830475038ef8b5ac793b383f61f2 Mon Sep 17 00:00:00 2001
+From: William Bright <111497515+WilliamBright-IMD@users.noreply.github.com>
+Date: Tue, 27 Jan 2026 16:39:02 +0000
+Subject: [PATCH] (drivers/media/i2c/ar1335) Exposure writes were missing
+ causing it to be constant exposure if using the Mali ISP and lowered OP Pixel
+ clock rate by half when using four lanes.
+
+* Adjusted the blanking limits with consideration for the fact that the AR1335 is still doing a full pixel array sample even though its scaling horizontally and skipping lines vertically
+* Reduce the OP clock when using four lanes by a factor of two. This is possible since we can send 4 bits per OP clock instead of 2 bits per OP clock when using two lanes.
+* This results in 30 FPS at 1080P without any image corruption issues on the IMDT V2 SBC.
+---
+ drivers/media/i2c/ar1335.c | 147 ++++++++++++++++++++++++++++---------
+ 1 file changed, 112 insertions(+), 35 deletions(-)
+
+diff --git a/drivers/media/i2c/ar1335.c b/drivers/media/i2c/ar1335.c
+index 2b41a7ccdef6..bf6fc4b40447 100644
+--- a/drivers/media/i2c/ar1335.c
++++ b/drivers/media/i2c/ar1335.c
+@@ -34,28 +34,30 @@
+ /* PLL and PLL2 */
+ #define AR1335_PLL_MIN			(320 * 1000 * 1000)
+ #define AR1335_PLL_MAX			(1200 * 1000 * 1000)
+-#define MAX_FRAME_RATE 60
+-#define MIN_FRAME_RATE 30
++#define MAX_FRAME_RATE 30
++#define MIN_FRAME_RATE 1
+ #define AR1335_DEF_FRAME_RATE 30
+ #define REG_FRAME_RATE 0x0340
+ 
+-/* Effective pixel sample rate on the pixel array. */
++/* Effective pixel sample rate on the pixel array.
++ * Pixel rate reduced due to layout issues
++ */
+ #define AR1335_PIXEL_CLOCK_RATE        (220 * 1000 * 1000)
+ #define AR1335_PIXEL_CLOCK_MIN         (168 * 1000 * 1000)
+-#define AR1335_PIXEL_CLOCK_MAX         (414 * 1000 * 1000)
++#define AR1335_PIXEL_CLOCK_MAX         (220 * 1000 * 1000)
+ 
+-#define AR1335_MIN_X_ADDR_START        8u
+-#define AR1335_MIN_Y_ADDR_START        8u
+-#define AR1335_MAX_X_ADDR_END          4231u
+-#define AR1335_MAX_Y_ADDR_END          3143u
++#define AR1335_MIN_X_ADDR_START        0x00C8 // 200
++#define AR1335_MIN_Y_ADDR_START        0x01F0 // 496
++#define AR1335_MAX_X_ADDR_END          0x0FC7 // 4039
++#define AR1335_MAX_Y_ADDR_END          0x0A5D // 2653
+ 
+ #define AR1335_WIDTH_MIN               0u
+ #define AR1335_WIDTH_MAX               4239u
+ #define AR1335_HEIGHT_MIN              0u
+ #define AR1335_HEIGHT_MAX              3151u
+ 
+-#define AR1335_WIDTH_BLANKING_MIN      240u
+-#define AR1335_HEIGHT_BLANKING_MIN     142u /* must be even */
++#define AR1335_WIDTH_BLANKING_MIN      0
++#define AR1335_HEIGHT_BLANKING_MIN     0 /* minimum vertical blanking lines */
+ #define AR1335_TOTAL_HEIGHT_MAX        65535u /* max_frame_length_lines */
+ #define AR1335_TOTAL_WIDTH_MAX         65532u /* max_line_length_pck */
+ 
+@@ -110,8 +112,11 @@
+ #define   AR1335_REG_HISPI_CONTROL_STATUS_FRAMER_TEST_MODE_ENABLE 0x80
+ 
+ #define be                                     cpu_to_be16
+-
++// 1920x1080 @30fps with horizontal scaling and vertical line skipping
+ #define AR1335_DEFAULT_FRAME_LENGTH_LINES 0x0C7A
++#define AR1335_DEFAULT_LINE_LENGTH_PCK 0x1200
++#define X_OUTPUT_SIZE 1920
++#define Y_OUTPUT_SIZE 1080
+ 
+ static const char * const ar1335_supply_names[] = {
+ 	"vdd_io",	/* I/O (1.8V) supply */
+@@ -154,26 +159,26 @@ struct set_bit_entry {
+ 	u16 val;
+ };
+ 
+-static const struct initial_reg initial_regs[] = { // 1080P @30fps
++static const struct initial_reg initial_regs[] = { // 1080P @22 FPS (limited by IMDT SBC pixel clock)
+ 	REGS(be(0x0300), be(0x0005)), // VT_PIX_CLK_DIV
+ 	REGS(be(0x0302), be(0x0001)), // VT_SYS_CLK_DIV
+ 	REGS(be(0x0304), be(0x0101)), // PRE_PLL_CLK_DIV
+ 	REGS(be(0x0306), be(0x2E2E)), // PLL_MULTIPLIER
+ 	REGS(be(0x0308), be(0x000A)), // OP_PIX_CLK_DIV
+ 	REGS(be(0x030A), be(0x0001)), // OP_SYS_CLK_DIV
+-	REGS(be(0x0344), be(0x00C8)), // X_ADDR_START
+-	REGS(be(0x0348), be(0x0FC7)), // X_ADDR_END
+-	REGS(be(0x0346), be(0x01F0)), // Y_ADDR_START
+-	REGS(be(0x034A), be(0x0A5F)), // Y_ADDR_END
+-	REGS(be(0x034C), be(0x0780)), // X_OUTPUT_SIZE
+-	REGS(be(0x034E), be(0x0438)), // Y_OUTPUT_SIZE
++	REGS(be(0x0344), be(AR1335_MIN_X_ADDR_START)), // X_ADDR_START
++	REGS(be(0x0348), be(AR1335_MAX_X_ADDR_END)), // X_ADDR_END
++	REGS(be(0x0346), be(AR1335_MIN_Y_ADDR_START)), // Y_ADDR_START
++	REGS(be(0x034A), be(AR1335_MAX_Y_ADDR_END)), // Y_ADDR_END
++	REGS(be(0x034C), be(X_OUTPUT_SIZE)), // X_OUTPUT_SIZE
++	REGS(be(0x034E), be(Y_OUTPUT_SIZE)), // Y_OUTPUT_SIZE
+ 	REGS(be(0x3040), be(0x0043)), // X_BIN, X_ODD_INC, Y_ODD_INC
+ 	REGS(be(0x3172), be(0x0206)), // DIGBIN_ENABLE
+ 	REGS(be(0x317A), be(0x516E)), // SF_BIN_ENABLE
+ 	REGS(be(0x3F3C), be(0x0003)), // SF_BIN_ENABLE
+ 	REGS(be(0x0400), be(0x0001)), // Scaling Enabling
+ 	REGS(be(0x0404), be(0x0020)), // Scale_M
+-	REGS(be(0x0342), be(0x1200)), // LINE_LENGTH_PCK
++	REGS(be(0x0342), be(AR1335_DEFAULT_LINE_LENGTH_PCK)), // LINE_LENGTH_PCK
+ 	REGS(be(0x0340), be(AR1335_DEFAULT_FRAME_LENGTH_LINES)), // FRAME_LENGTH_LINES
+ 	REGS(be(0x0202), be(0x0C5A)), // COARSE_INTEGRATION_TIME
+ 	REGS(be(0x31B0), be(0x005C)), // Frame Preamble
+@@ -393,12 +398,15 @@ static int ar1335_set_geometry(struct ar1335_dev *sensor)
+ 	u16 y_end = AR1335_MAX_Y_ADDR_END;
+ 	u16 out_width = 1920;
+ 	u16 out_height = 1080;
++	dev_dbg(&sensor->i2c_client->dev, "Setting geometry: x_start=%u, y_start=%u, x_end=%u, y_end=%u, out_width=%u, out_height=%u\n",
++		x_start, y_start, x_end, y_end, out_width, out_height);
+ 
+-	       /* All dimensions are unsigned 12-bit integers */
++	/* All dimensions are unsigned 12-bit integers */
++	/* Remember that we have scaling so we need to set FRAME_LENGTH_LINES and LINE_LENGTH_PCK accordingly */
+ 	__be16 regs[] = {
+ 		be(AR1335_REG_FRAME_LENGTH_LINES),
+-		be(out_height + sensor->ctrls.vblank->val),
+-		be(out_width + sensor->ctrls.hblank->val),
++		be(AR1335_DEFAULT_FRAME_LENGTH_LINES + sensor->ctrls.vblank->val),
++		be(AR1335_DEFAULT_LINE_LENGTH_PCK + sensor->ctrls.hblank->val),
+ 		be(x_start),
+ 		be(y_start),
+ 		be(x_end),
+@@ -468,9 +476,10 @@ static void ar1335_calc_pll(struct ar1335_dev *sensor)
+ 	u16 pre, mult;
+ 	u32 vco;
+ 	int bpp;
++	u8 divide_factor;
+ 
+ 	dev_dbg(&sensor->i2c_client->dev, "Calculating pixel clock\n");
+-	pixel_clock = AR1335_PIXEL_CLOCK_RATE * 2 / sensor->lane_count;
++	pixel_clock = AR1335_PIXEL_CLOCK_RATE; // Desired pixel clock rate
+ 	bpp = ar1335_code_to_bpp(sensor);
+ 	if (bpp < 0) {
+ 		dev_err(&sensor->i2c_client->dev, "Invalid bits per pixel\n");
+@@ -485,11 +494,28 @@ static void ar1335_calc_pll(struct ar1335_dev *sensor)
+ 
+ 	sensor->pll.pre = sensor->pll.pre2 = pre;
+ 	sensor->pll.mult = sensor->pll.mult2 = mult;
++	/* 	The OnSemi  AR1335 register wizard normally does the following:
++		OP Clock = VT clock /2
++		This assumes that we have two lanes and can do 2 bits per OP clock.
++		However if you have four lanes, 4 bits can be sent per OP clock, so we can reduce
++		the OP clock by a factor of two. 
++		This lowers the MIPI bitrate which reduces DPHY errors on the host.
++	*/
++	if (sensor->lane_count > 2)
++	{
++		divide_factor = sensor->lane_count / 2; 
++		dev_dbg(&sensor->i2c_client->dev, "Reducing OP clock by %u due to > 2 lanes \n", divide_factor);
++		sensor->pll.mult2 = mult / divide_factor;
++	}
+ 
+ 	dev_dbg(&sensor->i2c_client->dev, "PLL calculated: pre=%u, mult=%u, vco=%u, pixel_clock=%u, vt_pix=%u\n", pre, mult, vco, pixel_clock, sensor->pll.vt_pix);
+ 	dev_dbg(&sensor->i2c_client->dev, "Operational pixel clock rate: %u Hz\n",
+ 		vco / (sensor->pll.vt_pix * 2));
+ 	dev_dbg(&sensor->i2c_client->dev, "VT pixel clock rate: %u Hz\n", vco / sensor->pll.vt_pix);
++	u32 clk_bit_freq_mhz = sensor->extclk_freq * sensor->pll.mult2 / (pre * 1000000);
++	dev_dbg(&sensor->i2c_client->dev, "MIPI D-PHY bit clock frequency (All lanes): %u MHz\n", clk_bit_freq_mhz);
++	u32 lane_bit_freq_mbit = 2*  clk_bit_freq_mhz / sensor->lane_count; // 2 bits per clock
++	dev_dbg(&sensor->i2c_client->dev, "MIPI D-PHY bitrate/lane %u  MBit/s \n", lane_bit_freq_mbit);
+ }
+ 
+ static int ar1335_pll_config(struct ar1335_dev *sensor)
+@@ -690,11 +716,10 @@ static int ar1335_set_fmt(struct v4l2_subdev *sd,
+ 		goto unlock;
+ 	}
+ 
+-	/* Update the exposure and blankings limits. Blankings are also reset
+-	 * to the minimum.
++	/* Use minimum blanking values
+ 	 */
+-	int vblank = FRAME_LENGTH_LINE_MAX - fmt->height;
+-	int hblank = LINE_LENGTH_PCK_MAX - fmt->width;
++	int vblank = AR1335_HEIGHT_BLANKING_MIN;
++	int hblank = AR1335_WIDTH_BLANKING_MIN;
+ 
+ 	dev_dbg(&client->dev, "Calculated vblank=%d, hblank=%d\n", vblank, hblank);
+ 
+@@ -764,7 +789,13 @@ static int ar1335_test_pattern(struct v4l2_subdev *sd, s32 val)
+                                     ar1335_test_pattern_values[val]);
+ }
+ 
+-
++static int ar1335_write_exposure(struct ar1335_dev *sensor, u32 exposure)
++{
++	dev_dbg(&sensor->i2c_client->dev, "Setting exposure to %u lines\n", exposure);
++	return ar1335_write_reg(sensor,
++			       AR1335_REG_COARSE_INTEGRATION_TIME,
++			       exposure);
++}
+ static int ar1335_s_ctrl(struct v4l2_ctrl *ctrl)
+ {
+ 	struct v4l2_subdev *sd = ctrl_to_sd(ctrl);
+@@ -812,10 +843,9 @@ static int ar1335_s_ctrl(struct v4l2_ctrl *ctrl)
+ 	case V4L2_CID_BLUE_BALANCE:
+ 		ret = ar1335_set_gains(sensor);
+ 		break;
++	case V4L2_CID_ACAMERA_SENSOR_EXPOSURE_LINES:
+ 	case V4L2_CID_EXPOSURE:
+-		ret = ar1335_write_reg(sensor,
+-				       AR1335_REG_COARSE_INTEGRATION_TIME,
+-				       ctrl->val);
++		ret = ar1335_write_exposure(sensor, ctrl->val);
+ 		break;
+ 	case V4L2_CID_TEST_PATTERN:
+ 		 ret = ar1335_test_pattern(&sensor->sd,ctrl->val);
+@@ -1170,6 +1200,54 @@ static int ar1335_enum_frame_size(struct v4l2_subdev *sd,
+ // 	return ret;
+ // }
+ 
++static int ar1335_set_frame_interval(struct v4l2_subdev *subdev,
++				   struct v4l2_subdev_frame_interval *fival)
++{
++	struct ar1335_dev *sensor = to_ar1335_dev(subdev);
++
++	/* The sensor timing is fixed, so every request gets the default rate. */
++	mutex_lock(&sensor->lock);
++	ar1335_write_reg(sensor, 0x340, AR1335_DEFAULT_FRAME_LENGTH_LINES);
++	ar1335_write_reg(sensor, 0x202, AR1335_DEFAULT_LINE_LENGTH_PCK);
++	fival->interval.numerator = 1;
++	fival->interval.denominator = AR1335_DEF_FRAME_RATE;
++	sensor->frame_rate = fival->interval;
++	mutex_unlock(&sensor->lock);
++
++	return 0;
++}
++
++static int ar1335_get_frame_interval(struct v4l2_subdev *sd,
++				   struct v4l2_subdev_frame_interval *fi)
++{
++	struct ar1335_dev *sensor = to_ar1335_dev(sd);
++
++	mutex_lock(&sensor->lock);
++	fi->interval.denominator = sensor->frame_rate.denominator;
++	fi->interval.numerator = sensor->frame_rate.numerator;
++	mutex_unlock(&sensor->lock);
++
++	return 0;
++}
++
++static int ar1335_enum_frame_interval(struct v4l2_subdev *subdev,
++				struct v4l2_subdev_state *sd_state,
++				struct v4l2_subdev_frame_interval_enum *fie)
++{
++
++	if (fie->index != 0)
++		return -EINVAL;
++
++
++	fie->code = MEDIA_BUS_FMT_SGRBG10_1X10;
++	fie->width = 1920;
++	fie->height = 1080;
++	fie->interval.numerator = 1;
++	fie->interval.denominator = AR1335_DEF_FRAME_RATE; // 30 FPS
++
++	return 0;
++}
++
+ static int ar1335_s_stream(struct v4l2_subdev *sd, int enable)
+ {
+ 	struct ar1335_dev *sensor = to_ar1335_dev(sd);
+@@ -1215,8 +1293,8 @@ static const struct v4l2_subdev_core_ops ar1335_core_ops = {
+ };
+ 
+ static const struct v4l2_subdev_video_ops ar1335_video_ops = {
+-	// .s_frame_interval = ar1335_set_frame_interval,
+-	// .g_frame_interval = ar1335_get_frame_interval,
++	.s_frame_interval = ar1335_set_frame_interval,
++	.g_frame_interval = ar1335_get_frame_interval,
+ 	.s_stream = ar1335_s_stream,
+ 	//.pre_streamon = ar1335_pre_streamon,
+ };
+@@ -1224,8 +1302,7 @@ static const struct v4l2_subdev_video_ops ar1335_video_ops = {
+ static const struct v4l2_subdev_pad_ops ar1335_pad_ops = {
+ 	.enum_mbus_code = ar1335_enum_mbus_code,
+ 	.enum_frame_size = ar1335_enum_frame_size,
+-//	.set_frame_interval = ar1335_set_frame_interval,
+-//	.get_frame_interval = ar1335_get_frame_interval,
++	.enum_frame_interval = ar1335_enum_frame_interval,
+ 	.get_fmt = ar1335_get_fmt,
+ 	.set_fmt = ar1335_set_fmt,
+ };
+-- 
+2.43.0
+

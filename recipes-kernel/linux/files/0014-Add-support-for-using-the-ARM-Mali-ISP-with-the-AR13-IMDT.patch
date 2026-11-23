@@ -1,0 +1,1425 @@
+From ab244e4973c6302bc3f942d28247fbd57cea7ba5 Mon Sep 17 00:00:00 2001
+From: Lewis Purvis <lewisp@imd-tec.com>
+Date: Fri, 13 Mar 2026 11:08:34 +0000
+Subject: [PATCH 1/6] Add support for using the ARM Mali ISP with the AR1335
+ sensor with new Device tree overlays for CSI2, CSI3 and dual ISP
+ configurations.
+
+* Fixed a bug where the crop window was being set to 0,0,0,0 when the image converter is enabled
+* Added RAW10 size information to the format table when the image converter is used
+* Added missing image converter interrupts to the Device tree which was causing the IVC and CRU to not come up for CRU0,1,2,3
+* The CRU  frame done IRQ  handler when using the image converter doesn't seem to work correctly so the changes have been reverted
+* A new translation layer for the ACAMERA V4L2 bridge has been added to allow the Mali ISP firmware to communicate with the V4L2 framework
+* New Device tree overlays have been added for the IMDT V2 Plus SBC to support the AR1335 on CSI2 with ISP, CSI3 with ISP and dual ISP configurations
+* Fixed a bug with missing interrupts in the RZV2H ISP Device tree which was causing the ISP not to come up correctly
+* Updated the defconfig fragment isp.cfg to enable the Mali ISP and related drivers
+---
+ arch/arm64/boot/dts/renesas/Makefile          |   3 +
+ .../renesas/imdt-v2-sbc-ar1335-csi2-isp.dts   |  31 ++
+ .../renesas/imdt-v2-sbc-ar1335-csi3-isp.dts   |  31 ++
+ .../renesas/imdt-v2-sbc-ar1335-dual-isp.dts   |   6 +
+ .../renesas/imdt-v2-sbc-ar1335-dual-isp.dtsi  |  28 ++
+ arch/arm64/boot/dts/renesas/r9a09g057.dtsi    |  22 +-
+ drivers/clocksource/renesas-ostm.c            |  20 +-
+ drivers/media/i2c/Makefile                    |   6 +
+ drivers/media/i2c/ar1335.c                    | 203 +++++++--
+ .../platform/renesas/rzg2l-cru/rzg2l-cru.h    |   6 +-
+ .../platform/renesas/rzg2l-cru/rzg2l-dma.c    |  57 ++-
+ .../platform/renesas/rzg2l-cru/rzg2l-v4l2.c   |  32 +-
+ .../rzv2h-isp/subdev/sensor/app/soc_sensor.c  |  95 ++++-
+ .../src/driver/sensor/v4l2_subdev_drv.c       | 392 ++++++++++++++++++
+ .../src/fw/runtime_initialization_settings.h  |   8 +-
+ .../rzv2h-isp/v4l2_dev/app/main_kernel_v4l2.c |  22 +-
+ include/media/acamera_v4l2_bridge.h           |  26 ++
+ include/media/rzv2h-ivc.h                     |   2 +-
+ 18 files changed, 871 insertions(+), 119 deletions(-)
+ create mode 100644 arch/arm64/boot/dts/renesas/imdt-v2-sbc-ar1335-csi2-isp.dts
+ create mode 100644 arch/arm64/boot/dts/renesas/imdt-v2-sbc-ar1335-csi3-isp.dts
+ create mode 100644 arch/arm64/boot/dts/renesas/imdt-v2-sbc-ar1335-dual-isp.dts
+ create mode 100644 arch/arm64/boot/dts/renesas/imdt-v2-sbc-ar1335-dual-isp.dtsi
+ create mode 100644 drivers/media/platform/renesas/rzv2h-isp/subdev/sensor/src/driver/sensor/v4l2_subdev_drv.c
+ create mode 100644 include/media/acamera_v4l2_bridge.h
+
+diff --git a/arch/arm64/boot/dts/renesas/Makefile b/arch/arm64/boot/dts/renesas/Makefile
+index 9ae7d4fc0..92fdaf1e4 100644
+--- a/arch/arm64/boot/dts/renesas/Makefile
++++ b/arch/arm64/boot/dts/renesas/Makefile
+@@ -110,4 +110,7 @@ dtb-$(CONFIG_ARCH_R9A09G057) += imdt-v2h-sbc.dtb
+ dtb-$(CONFIG_ARCH_R9A09G057) += imdt-v2-sbc-dsi-panel.dtbo
+ dtb-$(CONFIG_ARCH_R9A09G057) += imdt-v2-sbc-dsi-hdmi.dtbo
+ dtb-$(CONFIG_ARCH_R9A09G057) += imdt-v2-sbc-ar1335-csi2.dtbo
++dtb-$(CONFIG_ARCH_R9A09G057) += imdt-v2-sbc-ar1335-csi2-isp.dtbo
++dtb-$(CONFIG_ARCH_R9A09G057) += imdt-v2-sbc-ar1335-csi3-isp.dtbo
++dtb-$(CONFIG_ARCH_R9A09G057) += imdt-v2-sbc-ar1335-dual-isp.dtbo
+ dtb-$(CONFIG_ARCH_R9A09G057) += imdt-v2-sbc-ar1335-csi3.dtbo
+diff --git a/arch/arm64/boot/dts/renesas/imdt-v2-sbc-ar1335-csi2-isp.dts b/arch/arm64/boot/dts/renesas/imdt-v2-sbc-ar1335-csi2-isp.dts
+new file mode 100644
+index 000000000..21fd5f15b
+--- /dev/null
++++ b/arch/arm64/boot/dts/renesas/imdt-v2-sbc-ar1335-csi2-isp.dts
+@@ -0,0 +1,31 @@
++/dts-v1/;
++/plugin/;
++#include <dt-bindings/interrupt-controller/arm-gic.h>
++#include <dt-bindings/pinctrl/rzg2l-pinctrl.h>
++#include <dt-bindings/gpio/gpio.h>
++#include "imdt-v2-sbc-ar1335-csi2.dtsi"
++
++&input_video_control {
++	status = "okay";
++	crus = <&cru2>;
++};
++
++&isp {
++	sensor-i2c = <&ar1335_csi22>;
++	sensor-default-preset-mode = <0>;
++	status = "okay";
++};
++
++&sensor {
++	status = "okay";
++    sensor-subdev-handles = <&ar1335_csi22>;
++};
++
++&lens {
++	status = "okay";
++};
++
++&iq {
++	status = "okay";
++};
++
+diff --git a/arch/arm64/boot/dts/renesas/imdt-v2-sbc-ar1335-csi3-isp.dts b/arch/arm64/boot/dts/renesas/imdt-v2-sbc-ar1335-csi3-isp.dts
+new file mode 100644
+index 000000000..dfa1f5c41
+--- /dev/null
++++ b/arch/arm64/boot/dts/renesas/imdt-v2-sbc-ar1335-csi3-isp.dts
+@@ -0,0 +1,31 @@
++/dts-v1/;
++/plugin/;
++#include <dt-bindings/interrupt-controller/arm-gic.h>
++#include <dt-bindings/pinctrl/rzg2l-pinctrl.h>
++#include <dt-bindings/gpio/gpio.h>
++#include "imdt-v2-sbc-ar1335-csi3.dtsi"
++
++&input_video_control {
++	status = "okay";
++	crus = <&cru3>;
++};
++
++&isp {
++	sensor-i2c = <&ar1335_csi23>;
++	sensor-default-preset-mode = <0>;
++	status = "okay";
++};
++
++&sensor {
++	status = "okay";
++    sensor-subdev-handles = <&ar1335_csi23>;
++};
++
++&lens {
++	status = "okay";
++};
++
++&iq {
++	status = "okay";
++};
++
+diff --git a/arch/arm64/boot/dts/renesas/imdt-v2-sbc-ar1335-dual-isp.dts b/arch/arm64/boot/dts/renesas/imdt-v2-sbc-ar1335-dual-isp.dts
+new file mode 100644
+index 000000000..958cc44b5
+--- /dev/null
++++ b/arch/arm64/boot/dts/renesas/imdt-v2-sbc-ar1335-dual-isp.dts
+@@ -0,0 +1,6 @@
++/dts-v1/;
++/plugin/;
++#include <dt-bindings/interrupt-controller/arm-gic.h>
++#include <dt-bindings/pinctrl/rzg2l-pinctrl.h>
++#include <dt-bindings/gpio/gpio.h>
++#include "imdt-v2-sbc-ar1335-dual-isp.dtsi"
+diff --git a/arch/arm64/boot/dts/renesas/imdt-v2-sbc-ar1335-dual-isp.dtsi b/arch/arm64/boot/dts/renesas/imdt-v2-sbc-ar1335-dual-isp.dtsi
+new file mode 100644
+index 000000000..6ce0ed58a
+--- /dev/null
++++ b/arch/arm64/boot/dts/renesas/imdt-v2-sbc-ar1335-dual-isp.dtsi
+@@ -0,0 +1,28 @@
++
++#include "imdt-v2-sbc-ar1335-csi2.dtsi"
++#include "imdt-v2-sbc-ar1335-csi3.dtsi"
++// Dual AR1335 camera configuration for IMDT V2 SBC with ARM Mali ISP
++&input_video_control {
++	status = "okay";
++	crus = <&cru2 &cru3>;
++};
++
++&isp {
++	sensor-i2c = <&ar1335_csi22 &ar1335_csi23>;
++	sensor-default-preset-mode = <0>;
++	status = "okay";
++};
++
++&sensor {
++	status = "okay";
++	sensor-subdev-handles = <&ar1335_csi22 &ar1335_csi23>;
++};
++
++&lens {
++	status = "okay";
++};
++
++&iq {
++	status = "okay";
++};
++
+diff --git a/arch/arm64/boot/dts/renesas/r9a09g057.dtsi b/arch/arm64/boot/dts/renesas/r9a09g057.dtsi
+index 406f7ddda..45e715b17 100644
+--- a/arch/arm64/boot/dts/renesas/r9a09g057.dtsi
++++ b/arch/arm64/boot/dts/renesas/r9a09g057.dtsi
+@@ -590,8 +590,8 @@ cru0: video0@16000000 {
+ 				 <&cpg CPG_MOD 0xD4>,
+ 				 <&cpg CPG_MOD 0xD2>;
+ 			clock-names = "video", "apb", "axi";
+-			interrupts = <GIC_SPI 842 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 839 IRQ_TYPE_LEVEL_HIGH>;
+-			interrupt-names = "cru_vsd_addr_wend", "axi_mst_err_int";
++			interrupts = <GIC_SPI 838 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 842 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 839 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "image_conv_int", "cru_vsd_addr_wend", "axi_mst_err_int";
+ 			resets = <&cpg 0xC5>, <&cpg 0xC6>;
+ 			reset-names = "presetn", "aresetn";
+ 			power-domains = <&cpg>;
+@@ -620,8 +620,8 @@ cru1: video1@16010000 {
+ 				 <&cpg CPG_MOD 0xD7>,
+ 				 <&cpg CPG_MOD 0xD5>;
+ 			clock-names = "video", "apb", "axi";
+-			interrupts = <GIC_SPI 848 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 845 IRQ_TYPE_LEVEL_HIGH>;
+-			interrupt-names = "cru_vsd_addr_wend", "axi_mst_err_int";
++			interrupts = <GIC_SPI 844 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 848 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 845 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "image_conv_int", "cru_vsd_addr_wend", "axi_mst_err_int";
+ 			resets = <&cpg 0xC8>, <&cpg 0xC9>;
+ 			reset-names = "presetn", "aresetn";
+ 			power-domains = <&cpg>;
+@@ -650,8 +650,8 @@ cru2: video2@16020000 {
+ 				 <&cpg CPG_MOD 0xDA>,
+ 				 <&cpg CPG_MOD 0xD8>;
+ 			clock-names = "video", "apb", "axi";
+-			interrupts = <GIC_SPI 853 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 851 IRQ_TYPE_LEVEL_HIGH>;
+-			interrupt-names = "cru_vsd_addr_wend", "axi_mst_err_int";
++			interrupts = <GIC_SPI 850 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 853 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 851 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "image_conv_int", "cru_vsd_addr_wend", "axi_mst_err_int";
+ 			resets = <&cpg 0xCB>, <&cpg 0xCC>;
+ 			reset-names = "presetn", "aresetn";
+ 			power-domains = <&cpg>;
+@@ -680,8 +680,8 @@ cru3: video3@16030000 {
+ 				 <&cpg CPG_MOD 0xDD>,
+ 				 <&cpg CPG_MOD 0xDB>;
+ 			clock-names = "video", "apb", "axi";
+-			interrupts = <GIC_SPI 858 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 856 IRQ_TYPE_LEVEL_HIGH>;
+-			interrupt-names = "cru_vsd_addr_wend", "axi_mst_err_int";
++			interrupts = <GIC_SPI 855 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 858 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 856 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "image_conv_int","cru_vsd_addr_wend", "axi_mst_err_int";
+ 			resets = <&cpg 0xCE>, <&cpg 0xCF>;
+ 			reset-names = "presetn", "aresetn";
+ 			power-domains = <&cpg>;
+@@ -1240,11 +1240,7 @@ sci7: serial@12802800 {
+ 			clocks = <&cpg CPG_MOD 128>,
+ 				 <&cpg CPG_MOD 129>;
+ 			clock-names = "fck", "tclk";
+-			power-domains = <&cpg>;
+-			resets = <&cpg 143>,
+-				 <&cpg 144>;
+-			reset-names = "presetn", "tresetn";
+-			status = "disabled";
++
+ 		};
+ 
+ 		rsci_i2c7: i2c@12802800 {
+diff --git a/drivers/clocksource/renesas-ostm.c b/drivers/clocksource/renesas-ostm.c
+index 3039ebbc7..837dff712 100644
+--- a/drivers/clocksource/renesas-ostm.c
++++ b/drivers/clocksource/renesas-ostm.c
+@@ -64,16 +64,6 @@ static void ostm_timer_stop(struct timer_of *to)
+ 	}
+ }
+ 
+-static void ostm_clksrc_suspend(struct clocksource *c)
+-{
+-	struct ostm_clksrc *ostm_clksrc =
+-			container_of(c, struct ostm_clksrc, clksrc);
+-	struct timer_of *to = ostm_clksrc->to;
+-
+-	clk_disable_unprepare(to->of_clk.clk);
+-	reset_control_assert(ostm_clksrc->rstc);
+-}
+-
+ static void ostm_clksrc_resume(struct clocksource *c)
+ {
+ 	struct ostm_clksrc *ostm_clksrc =
+@@ -94,6 +84,16 @@ static void ostm_clksrc_resume(struct clocksource *c)
+ 	writeb(TS, timer_of_base(to) + OSTM_TS);
+ }
+ 
++static void ostm_clksrc_suspend(struct clocksource *c)
++{
++	struct ostm_clksrc *ostm_clksrc =
++			container_of(c, struct ostm_clksrc, clksrc);
++	struct timer_of *to = ostm_clksrc->to;
++
++	clk_disable_unprepare(to->of_clk.clk);
++	reset_control_assert(ostm_clksrc->rstc);
++}
++
+ static u64 ostm_clksrc_readl_up(struct clocksource *c)
+ {
+ 	struct ostm_clksrc *ostm_clksrc =
+diff --git a/drivers/media/i2c/Makefile b/drivers/media/i2c/Makefile
+index f75045551..436f98d2a 100644
+--- a/drivers/media/i2c/Makefile
++++ b/drivers/media/i2c/Makefile
+@@ -145,3 +145,9 @@ obj-$(CONFIG_VIDEO_VPX3220) += vpx3220.o
+ obj-$(CONFIG_VIDEO_VS6624) += vs6624.o
+ obj-$(CONFIG_VIDEO_WM8739) += wm8739.o
+ obj-$(CONFIG_VIDEO_WM8775) += wm8775.o
++
++obj-$(CONFIG_SDR_MAX2175) += max2175.o
++# Acamera required for sensors interfacing with the mali isp
++EXTRA_CFLAGS += -I$(srctree)/drivers/media/platform/renesas/rzv2h-isp/v4l2_dev/src/fw/
++EXTRA_CFLAGS += -I$(srctree)/drivers/media/platform/renesas/rzv2h-isp/v4l2_dev/inc/
++EXTRA_CFLAGS += -I$(srctree)/drivers/media/platform/renesas/rzv2h-isp/v4l2_dev/inc/api/
+diff --git a/drivers/media/i2c/ar1335.c b/drivers/media/i2c/ar1335.c
+index 55627fc64..2b41a7ccd 100644
+--- a/drivers/media/i2c/ar1335.c
++++ b/drivers/media/i2c/ar1335.c
+@@ -21,6 +21,8 @@
+ #include <media/v4l2-ctrls.h>
+ #include <media/v4l2-fwnode.h>
+ #include <media/v4l2-subdev.h>
++#include <media/acamera_v4l2_bridge.h>
++#include "acamera_math.h"
+ #define AR1335_NAME "ar1335"
+ #define AR1335_MAX_RATIO_MISMATCH 10
+ #define EXPOSURE_MAX 0xC4E
+@@ -62,6 +64,17 @@
+ #define AR1335_ANA_GAIN_STEP           0x01
+ #define AR1335_ANA_GAIN_DEFAULT        0x00
+ 
++#define AR1335_ANA_GAIN_LOG2_MIN -2 // Corresponds to 0.25x
++#define AR1335_ANA_GAIN_LOG2_MAX 6  // Corresponds to 64x
++#define AR1335_ANA_GAIN_LOG2_DEFAULT 0 // Corresponds to 1x
++// Disable digital gain controls for now
++#define AR1335_DIG_GAIN_LOG2_MIN 0  // Corresponds to 1x
++#define AR1335_DIG_GAIN_LOG2_MAX 0  // Corresponds to 1x
++#define AR1335_DIG_GAIN_LOG2_DEFAULT 0 // Corresponds to 1x
++#define AR1335_ANALOGUE_GAIN_FP_PRECISION 2
++#define AR1335_DIGITAL_GAIN_FP_PRECISION 4
++#define AR1335_ACAMERA_BAYER_PATTERN_INDEX_GRBG 1
++
+ /* AR1335 registers */
+ #define AR1335_REG_VT_PIX_CLK_DIV              0x0300
+ #define AR1335_REG_FRAME_LENGTH_LINES          0x0340
+@@ -98,6 +111,8 @@
+ 
+ #define be                                     cpu_to_be16
+ 
++#define AR1335_DEFAULT_FRAME_LENGTH_LINES 0x0C7A
++
+ static const char * const ar1335_supply_names[] = {
+ 	"vdd_io",	/* I/O (1.8V) supply */
+ 	"vdd",		/* Core, PLL and MIPI (1.2V) supply */
+@@ -140,35 +155,35 @@ struct set_bit_entry {
+ };
+ 
+ static const struct initial_reg initial_regs[] = { // 1080P @30fps
+-    REGS(be(0x0300), be(0x0005)), // VT_PIX_CLK_DIV
+-    REGS(be(0x0302), be(0x0001)), // VT_SYS_CLK_DIV
+-    REGS(be(0x0304), be(0x0101)), // PRE_PLL_CLK_DIV
+-    REGS(be(0x0306), be(0x2E2E)), // PLL_MULTIPLIER
+-    REGS(be(0x0308), be(0x000A)), // OP_PIX_CLK_DIV
+-    REGS(be(0x030A), be(0x0001)), // OP_SYS_CLK_DIV
+-    REGS(be(0x0344), be(0x00C8)), // X_ADDR_START
+-    REGS(be(0x0348), be(0x0FC7)), // X_ADDR_END
+-    REGS(be(0x0346), be(0x01F0)), // Y_ADDR_START
+-    REGS(be(0x034A), be(0x0A5F)), // Y_ADDR_END
+-    REGS(be(0x034C), be(0x0780)), // X_OUTPUT_SIZE
+-    REGS(be(0x034E), be(0x0438)), // Y_OUTPUT_SIZE
+-    REGS(be(0x3040), be(0x0043)), // X_BIN, X_ODD_INC, Y_ODD_INC
+-    REGS(be(0x3172), be(0x0206)), // DIGBIN_ENABLE
+-    REGS(be(0x317A), be(0x516E)), // SF_BIN_ENABLE
+-    REGS(be(0x3F3C), be(0x0003)), // SF_BIN_ENABLE
+-    REGS(be(0x0400), be(0x0001)), // Scaling Enabling
+-    REGS(be(0x0404), be(0x0020)), // Scale_M
+-    REGS(be(0x0342), be(0x1200)), // LINE_LENGTH_PCK
+-    REGS(be(0x0340), be(0x0C7A)), // FRAME_LENGTH_LINES
+-    REGS(be(0x0202), be(0x0C5A)), // COARSE_INTEGRATION_TIME
+-    REGS(be(0x31B0), be(0x005C)), // Frame Preamble
+-    REGS(be(0x31B2), be(0x002D)), // Line Preamble
+-    REGS(be(0x31B4), be(0x2412)), // MIPI Timing 0
+-    REGS(be(0x31B6), be(0x142A)), // MIPI Timing 1
+-    REGS(be(0x31B8), be(0x2413)), // MIPI Timing 2
+-    REGS(be(0x31BA), be(0x1C70)), // MIPI Timing 3
+-    REGS(be(0x31BC), be(0x868B)), // MIPI Timing 4
+-    REGS(be(0x0112), be(0x0A0A)), // CCP_DATA_FORMAT
++	REGS(be(0x0300), be(0x0005)), // VT_PIX_CLK_DIV
++	REGS(be(0x0302), be(0x0001)), // VT_SYS_CLK_DIV
++	REGS(be(0x0304), be(0x0101)), // PRE_PLL_CLK_DIV
++	REGS(be(0x0306), be(0x2E2E)), // PLL_MULTIPLIER
++	REGS(be(0x0308), be(0x000A)), // OP_PIX_CLK_DIV
++	REGS(be(0x030A), be(0x0001)), // OP_SYS_CLK_DIV
++	REGS(be(0x0344), be(0x00C8)), // X_ADDR_START
++	REGS(be(0x0348), be(0x0FC7)), // X_ADDR_END
++	REGS(be(0x0346), be(0x01F0)), // Y_ADDR_START
++	REGS(be(0x034A), be(0x0A5F)), // Y_ADDR_END
++	REGS(be(0x034C), be(0x0780)), // X_OUTPUT_SIZE
++	REGS(be(0x034E), be(0x0438)), // Y_OUTPUT_SIZE
++	REGS(be(0x3040), be(0x0043)), // X_BIN, X_ODD_INC, Y_ODD_INC
++	REGS(be(0x3172), be(0x0206)), // DIGBIN_ENABLE
++	REGS(be(0x317A), be(0x516E)), // SF_BIN_ENABLE
++	REGS(be(0x3F3C), be(0x0003)), // SF_BIN_ENABLE
++	REGS(be(0x0400), be(0x0001)), // Scaling Enabling
++	REGS(be(0x0404), be(0x0020)), // Scale_M
++	REGS(be(0x0342), be(0x1200)), // LINE_LENGTH_PCK
++	REGS(be(0x0340), be(AR1335_DEFAULT_FRAME_LENGTH_LINES)), // FRAME_LENGTH_LINES
++	REGS(be(0x0202), be(0x0C5A)), // COARSE_INTEGRATION_TIME
++	REGS(be(0x31B0), be(0x005C)), // Frame Preamble
++	REGS(be(0x31B2), be(0x002D)), // Line Preamble
++	REGS(be(0x31B4), be(0x2412)), // MIPI Timing 0
++	REGS(be(0x31B6), be(0x142A)), // MIPI Timing 1
++	REGS(be(0x31B8), be(0x2413)), // MIPI Timing 2
++	REGS(be(0x31BA), be(0x1C70)), // MIPI Timing 3
++	REGS(be(0x31BC), be(0x868B)), // MIPI Timing 4
++	REGS(be(0x0112), be(0x0A0A)), // CCP_DATA_FORMAT
+ };
+ 
+ struct ar1335_ctrls {
+@@ -185,6 +200,7 @@ struct ar1335_ctrls {
+ 	struct v4l2_ctrl *pixrate;
+ 	struct v4l2_ctrl *exposure;
+ 	struct v4l2_ctrl *test_pattern;
++	struct v4l2_ctrl *analogue_gain;
+ };
+ 
+ struct ar1335_dev {
+@@ -776,6 +792,21 @@ static int ar1335_s_ctrl(struct v4l2_ctrl *ctrl)
+ 		ret = ar1335_write_reg(sensor, AR1335_REG_ANA_GAIN_CODE_GLOBAL,
+ 				       ctrl->val);
+ 		break;
++	case V4L2_CID_ACAMERA_SET_AGAIN_LOG2:
++	{
++		u32 analog_gain = acamera_math_exp2(ctrl->val,LOG2_GAIN_SHIFT, AR1335_ANALOGUE_GAIN_FP_PRECISION);
++		dev_dbg(&sensor->i2c_client->dev, "Setting analog gain to %u (log2=%d)\n", analog_gain, ctrl->val);
++		__v4l2_ctrl_s_ctrl(sensor->ctrls.analogue_gain, analog_gain);
++		ret = ar1335_write_reg(sensor, AR1335_REG_ANA_GAIN_CODE_GLOBAL,
++					  analog_gain);
++		break;
++	}
++	case V4L2_CID_ACAMERA_SET_DGAIN_LOG2:
++	{
++		// Do nothing - not used
++		ret = 0;
++		break;
++	}
+ 	case V4L2_CID_GAIN:
+ 	case V4L2_CID_RED_BALANCE:
+ 	case V4L2_CID_BLUE_BALANCE:
+@@ -811,6 +842,107 @@ static const char * const test_pattern_menu[] = {
+ 	"Walking 1s (8-bit)",
+ };
+ 
++
++static const struct v4l2_ctrl_config ar1335_custom_ctrls[] = {
++	{
++		//
++		.ops		= &ar1335_ctrl_ops,
++		.id			= V4L2_CID_ACAMERA_SET_AGAIN_LOG2,
++		.type		= V4L2_CTRL_TYPE_INTEGER,
++		.name		= "Analog Gain Log2 Acamera",
++		.min		= (AR1335_ANA_GAIN_LOG2_MIN << LOG2_GAIN_SHIFT),
++		.max		= (AR1335_ANA_GAIN_LOG2_MAX << LOG2_GAIN_SHIFT),
++		.step		= 1,
++		.def		= (AR1335_ANA_GAIN_LOG2_DEFAULT << LOG2_GAIN_SHIFT),
++		.flags		= 0,
++	},
++	{
++	
++		.ops		= &ar1335_ctrl_ops,
++		.id			= V4L2_CID_ACAMERA_SET_DGAIN_LOG2,
++		.type		= V4L2_CTRL_TYPE_INTEGER,
++		.name		= "Digital Gain Log2 Acamera",
++		.min 		= (AR1335_DIG_GAIN_LOG2_MIN << LOG2_GAIN_SHIFT),
++		.max		= (AR1335_DIG_GAIN_LOG2_MAX << LOG2_GAIN_SHIFT),
++		.step		= 1,
++		.def		= (AR1335_DIG_GAIN_LOG2_DEFAULT << LOG2_GAIN_SHIFT),
++		.flags = 0,
++	},
++	// 
++	{
++		.ops		= &ar1335_ctrl_ops,
++		.id			= V4L2_CID_ACAMERA_LINE_DURATION_NANOSECONDS,
++		.type		= V4L2_CTRL_TYPE_INTEGER,
++		.name		= "Line Duration",// HTS in pixel clocks
++		.min		= 0,
++		.max		= 1000000000,
++		.step		= 1,
++		.def		= (1000000000) / (AR1335_DEF_FRAME_RATE * AR1335_DEFAULT_FRAME_LENGTH_LINES), // Default VTS of 0x0C7A (3194) pixel clocks at 30 FPS,
++		.flags		= V4L2_CTRL_FLAG_READ_ONLY ,
++	},
++	{
++		//
++		.ops		= &ar1335_ctrl_ops,
++		.id			= V4L2_CID_ACAMERA_FRAME_LINES_PER_SECOND,
++		.type		= V4L2_CTRL_TYPE_INTEGER,
++		.name		= "Frame Lines",// VTS in lines
++		.min		= 0,
++		.max		= 1000000000,
++		.step		= 1,
++		.def		= AR1335_DEFAULT_FRAME_LENGTH_LINES*AR1335_DEF_FRAME_RATE,
++		.flags		= V4L2_CTRL_FLAG_READ_ONLY ,
++	},
++	{
++		//
++		.ops		= &ar1335_ctrl_ops,
++		.id			= V4L2_CID_ACAMERA_SENSOR_MAX_VMAX_LINES,
++		.type		= V4L2_CTRL_TYPE_INTEGER,
++		.name		= "Sensor Max VMAX Lines",
++		.min		= 0,
++		.max		= 1000000,
++		.step		= 1,
++		.def		= AR1335_TOTAL_HEIGHT_MAX,
++		.flags		= V4L2_CTRL_FLAG_READ_ONLY,
++	},
++	{
++		//
++		.ops		= &ar1335_ctrl_ops,
++		.id			= V4L2_CID_ACAMERA_SENSOR_MAX_HMAX_PIXELS,
++		.type		= V4L2_CTRL_TYPE_INTEGER,
++		.name		= "Sensor Max HMAX Pixels",
++		.min		= 0,
++		.max		= 1000000,
++		.step		= 1,
++		.def		= AR1335_TOTAL_WIDTH_MAX,
++		.flags		= V4L2_CTRL_FLAG_READ_ONLY ,
++	},
++	{
++		//
++		.ops		= &ar1335_ctrl_ops,
++		.id			= V4L2_CID_ACAMERA_SENSOR_BAYER_FORMAT,
++		.type		= V4L2_CTRL_TYPE_INTEGER,
++		.name		= "Sensor ACamera Bayer Format",
++		.min		= 0,
++		.max		= 3,
++		.step		= 1,
++		.def		= AR1335_ACAMERA_BAYER_PATTERN_INDEX_GRBG, // BGGR
++		.flags		= V4L2_CTRL_FLAG_READ_ONLY ,
++	},
++	{
++		//
++		.ops		= &ar1335_ctrl_ops,
++		.id			= V4L2_CID_ACAMERA_SENSOR_EXPOSURE_LINES,
++		.type		= V4L2_CTRL_TYPE_INTEGER,
++		.name		= "Sensor Exposure Max (lines)",
++		.min		= 0,
++		.max		= AR1335_DEFAULT_FRAME_LENGTH_LINES,
++		.step		= 1,
++		.def		= AR1335_DEFAULT_FRAME_LENGTH_LINES,
++		.flags		= V4L2_CTRL_FLAG_READ_ONLY ,
++	},
++
++};
++
+ static int ar1335_init_controls(struct ar1335_dev *sensor)
+ {
+ 	const struct v4l2_ctrl_ops *ops = &ar1335_ctrl_ops;
+@@ -819,14 +951,14 @@ static int ar1335_init_controls(struct ar1335_dev *sensor)
+ 	int max_vblank, max_hblank;
+ 	struct v4l2_ctrl *link_freq;
+ 	int ret;
+-
+-	v4l2_ctrl_handler_init(hdl, 32);
++	
++	v4l2_ctrl_handler_init(hdl, 32 + ARRAY_SIZE(ar1335_custom_ctrls));
+ 
+ 	/* We can use our own mutex for the ctrl lock */
+ 	hdl->lock = &sensor->lock;
+ 
+ 	/* Analog gain */
+-	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_ANALOGUE_GAIN,
++	ctrls->analogue_gain = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_ANALOGUE_GAIN,
+ 			  AR1335_ANA_GAIN_MIN, AR1335_ANA_GAIN_MAX,
+ 			  AR1335_ANA_GAIN_STEP, AR1335_ANA_GAIN_DEFAULT);
+ 
+@@ -870,7 +1002,12 @@ static int ar1335_init_controls(struct ar1335_dev *sensor)
+ 					V4L2_CID_TEST_PATTERN,
+ 					ARRAY_SIZE(test_pattern_menu) - 1,
+ 					0, 0, test_pattern_menu);
+-
++	for (ret = 0; ret < ARRAY_SIZE(ar1335_custom_ctrls); ret++) {
++		v4l2_ctrl_new_custom(hdl, &ar1335_custom_ctrls[ret], NULL);
++		if(hdl->error) {
++			dev_err(&sensor->i2c_client->dev, "Error creating custom control %s\n", ar1335_custom_ctrls[ret].name);
++		}
++	}
+ 	if (hdl->error) {
+ 		ret = hdl->error;
+ 		goto free_ctrls;
+diff --git a/drivers/media/platform/renesas/rzg2l-cru/rzg2l-cru.h b/drivers/media/platform/renesas/rzg2l-cru/rzg2l-cru.h
+index 318d72131..33f68f37e 100644
+--- a/drivers/media/platform/renesas/rzg2l-cru/rzg2l-cru.h
++++ b/drivers/media/platform/renesas/rzg2l-cru/rzg2l-cru.h
+@@ -23,7 +23,7 @@
+ 
+ #ifndef __RZG2L_CRU__
+ #define __RZG2L_CRU__
+-
++#define CONFIG_VIDEO_RZG2L_CRU_IMAGE_PROCESSOR
+ #include <media/v4l2-async.h>
+ #include <media/v4l2-ctrls.h>
+ #include <media/v4l2-dev.h>
+@@ -215,8 +215,8 @@ static const struct regs_offset rzv2h_cru_regs_offset[] = {
+ #define CRU_CHANNEL_MAX		4
+ 
+ /* Number of HW buffers */
+-#define HW_BUFFER_MAX		8
+-#define HW_BUFFER_DEFAULT	4
++#define HW_BUFFER_MAX		20
++#define HW_BUFFER_DEFAULT	12
+ 
+ /* Number of HW Bus Transfer Completion Events */
+ #define HW_IVT_MAX		5
+diff --git a/drivers/media/platform/renesas/rzg2l-cru/rzg2l-dma.c b/drivers/media/platform/renesas/rzg2l-cru/rzg2l-dma.c
+index de0fccd60..81404dc96 100644
+--- a/drivers/media/platform/renesas/rzg2l-cru/rzg2l-dma.c
++++ b/drivers/media/platform/renesas/rzg2l-cru/rzg2l-dma.c
+@@ -228,12 +228,18 @@ struct image_conv_settings {
+  * @param	[out]cv pointer to image converter settings
+  * @param	[in]cv pointer to pixel area settings
+  */
+-static void pixel_area_to_image_conv_settings(struct image_conv_settings *cv, const struct rzg2l_sensor_settings *a)
++static void pixel_area_to_image_conv_settings(struct image_conv_settings *cv, const struct rzg2l_cru_dev *const cru, const struct rzg2l_sensor_settings *a)
+ {
+ 	cv->SLPrC = a->pixel_area.vertical.dummy_0 + a->pixel_area.vertical.ignored_area_of_effective_pixel_0 + a->pixel_area.vertical.effective_margin_for_color_processing_0 + 1;
+ 	cv->ELPrC = cv->SLPrC + a->pixel_area.vertical.recording_pixel_area - 1;
++	// if no valid recording area set, fallback to full height
++	if(cv->ELPrC - cv->SLPrC <128 )
++		cv->ELPrC = cru->format.height;
+ 	cv->SPPrC = a->pixel_area.horizontal.dummy_0 + a->pixel_area.horizontal.ignored_area_of_effective_pixel_0 + a->pixel_area.horizontal.effective_margin_for_color_processing_0 + 1;
+ 	cv->EPPrC = cv->SPPrC + a->pixel_area.horizontal.recording_pixel_area - 1;
++	// if no valid recording area set, fallback to full width
++	if(cv->EPPrC - cv->SPPrC < 128 )
++		cv->EPPrC = cru->format.width;
+ //	printk("pixel_area_to_image_conv_settings: %d %d %d %d\n", cv->SLPrC, cv->ELPrC, cv->SPPrC, cv->EPPrC);
+ }
+ #endif
+@@ -873,7 +879,7 @@ static int rzg2l_cru_initialize_image_conv(struct rzg2l_cru_dev *cru)
+ 		{
+ 			struct image_conv_settings ic;
+ 
+-			pixel_area_to_image_conv_settings(&ic, &cru->sensor_settings);
++			pixel_area_to_image_conv_settings(&ic, cru, &cru->sensor_settings);
+ 			rzg2l_cru_write(cru, ICnSLPrC_C0, ic.SLPrC);
+ 			if (cru->exposure == 2)
+ 				rzg2l_cru_write(cru, ICnSLPrC_C1, ic.SLPrC);
+@@ -1132,6 +1138,7 @@ static void rzg2l_cru_stop_streaming(struct vb2_queue *vq)
+ {
+ 	struct rzg2l_cru_dev *cru = vb2_get_drv_priv(vq);
+ 
++	cru_dbg(cru, "Stop streaming requested\n");
+ 	cru->state = STOPPING;
+ 
+ 	if (cru->retry_thread)
+@@ -1150,6 +1157,8 @@ static void rzg2l_cru_stop_streaming(struct vb2_queue *vq)
+ 	/* Free scratch buffer */
+ 	dma_free_coherent(cru->dev, rzg2l_cru_get_sizeimage(cru), cru->scratch,
+ 			  cru->scratch_phys);
++
++	cru_dbg(cru, "Stop streaming completed\n");
+ }
+ 
+ static int retry_streaming_func(void *data)
+@@ -1382,10 +1391,10 @@ static irqreturn_t rzv2h_cru_irq(int irq, void *data)
+ {
+ 	struct rzg2l_cru_dev *cru = data;
+ 	unsigned long flags;
+-	u32 irq_status, i, slot;
++	u32 irq_status, slot;
+ 	unsigned int handled = 0;
+ 	dma_addr_t phys_addr;
+-	bool write_complete = false;
++	bool write_complete;
+ 
+ 	spin_lock_irqsave(&cru->qlock, flags);
+ 
+@@ -1407,29 +1416,27 @@ static irqreturn_t rzv2h_cru_irq(int irq, void *data)
+ 	phys_addr |= (((unsigned long) rzg2l_cru_read(cru, AMnMADRSH)) << 32);
+ 
+ 	/* Check current HW slot based on current MB address */
+-	slot = prev_slot[cru->id];
+-	for (i = 0; i < cru->num_buf; i++) {
++	write_complete = 0;
++	for (slot = 0; slot < cru->num_buf; slot++) {
+ 		dma_addr_t tmp;
+-
+-		slot++;
+-		if (slot >= cru->num_buf)
+-			slot = 0;
++dma_addr_t dma_size;
+ 
+ 		tmp = amnmbxaddrh[cru->id][slot];
+ 		tmp = (tmp << 32) | amnmbxaddrl[cru->id][slot];
+ 
+-		tmp = phys_addr - tmp;
+-		if (((long) tmp) && (tmp <= rzg2l_cru_get_sizeimage(cru))) {
+-			write_complete = true;
++		dma_size = phys_addr - tmp;
++		if (((long) dma_size) && (dma_size <= cru->format.sizeimage)) {
++			write_complete = 1;
++			cru_dbg(cru, "write_done: slot %d at 0x%llx. dma_size is 0x%llx\n",  slot, tmp, dma_size);
+ 			break;
+ 		}
+ 	}
+-	prev_slot[cru->id] = slot;
+-
++	
+ 	/* Prepare for capture and update state */
+ 	if (!write_complete) {
+-		// use last slot
+-		cru_info(cru, "Slot[%d] doesn't have proper output, but continue with it anyway", slot);
++		//Could not find a slot,  which probably means the CRU is stuck. need to quit here.
++		cru_dbg(cru, "Invalid MB address 0x%llx\n", phys_addr);
++		goto done;
+ 	}
+ 
+ 	/*
+@@ -1450,20 +1457,8 @@ static irqreturn_t rzv2h_cru_irq(int irq, void *data)
+ 		cru->state = RUNNING;
+ 	}
+ 
+-	if (slot != prev_slot[cru->id]) {
+-		/* Update value of previous memory bank slot */
+-		prev_slot[cru->id] = slot;
+-	} else {
+-		/*
+-		* AXI-Bus congestion maybe occurred.
+-		* Set auto recovery mode to clear all FIFOs
+-		* and resume transmission.
+-		*/
+-		rzg2l_cru_write(cru, AMnFIFO, 0);
+-
+-		cru_dbg(cru, "Dropping frame %u with CRU channel %d\n", cru->sequence, cru->id);
+-		goto done;
+-	}
++	/* Update previous slot for tracking */
++	prev_slot[cru->id] = slot;
+ 
+ 	/* Capture frame */
+ 	if (cru->queue_buf[slot]) {
+diff --git a/drivers/media/platform/renesas/rzg2l-cru/rzg2l-v4l2.c b/drivers/media/platform/renesas/rzg2l-cru/rzg2l-v4l2.c
+index 77f500b90..16f35ea50 100644
+--- a/drivers/media/platform/renesas/rzg2l-cru/rzg2l-v4l2.c
++++ b/drivers/media/platform/renesas/rzg2l-cru/rzg2l-v4l2.c
+@@ -104,22 +104,46 @@ static const struct rzg2l_cru_video_format rzg2l_cru_formats[] = {
+ 	},
+ 	{
+ 		.fourcc			= V4L2_PIX_FMT_SRGGB10,
+-		.bpp			= 2,
++#ifdef CONFIG_VIDEO_RZG2L_CRU_IMAGE_PROCESSOR
++		.bpp			= 8,
++		.bpp_denominator_minus1 = 5,
++#else
++		.bpp			= 5,
++		.bpp_denominator_minus1 = 3,
++#endif
+ 		.dtype		= 0x2b,
+ 	},
+ 	{
+ 		.fourcc			= V4L2_PIX_FMT_SBGGR10,
+-		.bpp			= 2,
++#ifdef CONFIG_VIDEO_RZG2L_CRU_IMAGE_PROCESSOR
++		.bpp			= 8,
++		.bpp_denominator_minus1 = 5,
++#else
++		.bpp			= 5,
++		.bpp_denominator_minus1 = 3,
++#endif
+ 		.dtype		= 0x2b,
+ 	},
+ 	{
+ 		.fourcc			= V4L2_PIX_FMT_SGRBG10,
+-		.bpp			= 2,
++#ifdef CONFIG_VIDEO_RZG2L_CRU_IMAGE_PROCESSOR
++		.bpp			= 8,
++		.bpp_denominator_minus1 = 5,
++#else
++		.bpp			= 5,
++		.bpp_denominator_minus1 = 3,
++#endif
+ 		.dtype		= 0x2b,
+ 	},
+ 	{
+ 		.fourcc			= V4L2_PIX_FMT_SGBRG10,
+-		.bpp			= 2,
++#ifdef CONFIG_VIDEO_RZG2L_CRU_IMAGE_PROCESSOR
++		.bpp			= 8,
++		.bpp_denominator_minus1 = 5,
++#else
++		.bpp			= 5,
++		.bpp_denominator_minus1 = 3,
++#endif
+ 		.dtype		= 0x2b,
+ 	},
+ 	{
+diff --git a/drivers/media/platform/renesas/rzv2h-isp/subdev/sensor/app/soc_sensor.c b/drivers/media/platform/renesas/rzv2h-isp/subdev/sensor/app/soc_sensor.c
+index 03565cbcf..a37871e98 100644
+--- a/drivers/media/platform/renesas/rzv2h-isp/subdev/sensor/app/soc_sensor.c
++++ b/drivers/media/platform/renesas/rzv2h-isp/subdev/sensor/app/soc_sensor.c
+@@ -34,7 +34,7 @@
+ #define ARGS_TO_PTR( arg ) ( (struct soc_sensor_ioctl_args *)arg )
+ 
+ 
+-void ( *SOC_SENSOR_SENSOR_ENTRY_ARR[FIRMWARE_CONTEXT_NUMBER] )( void **ctx, sensor_control_t *ctrl ) = SENSOR_INIT_SUBDEV_FUNCTIONS;
++void ( *SOC_SENSOR_SENSOR_ENTRY_ARR[FIRMWARE_CONTEXT_NUMBER] )( void **ctx, sensor_control_t *ctrl, const struct v4l2_subdev *sd ) = SENSOR_INIT_SUBDEV_FUNCTIONS;
+ void ( *SOC_SENSOR_SENSOR_RESET_ARR[FIRMWARE_CONTEXT_NUMBER] )( void *ctx ) = SENSOR_DEINIT_SUBDEV_FUNCTIONS;
+ 
+ static struct v4l2_subdev soc_sensor;
+@@ -79,14 +79,28 @@ static int camera_log_status( struct v4l2_subdev *sd )
+ 
+ static int camera_init( struct v4l2_subdev *sd, u32 val )
+ {
+-    int rc = 0;
+-
++    int rc =0;
+     if ( val < FIRMWARE_CONTEXT_NUMBER && SOC_SENSOR_SENSOR_ENTRY_ARR[val] ) {
+ 
+         s_ctx[val].camera_context = NULL;
+-
+-        ( SOC_SENSOR_SENSOR_ENTRY_ARR[val] )( &( s_ctx[val].camera_context ), &( s_ctx[val].camera_control ) );
+-
++        const struct device_node *of_node =  soc_sensor.dev->of_node;
++        if(!of_node){
++            LOG( LOG_ERR, "soc_sensor dev has no of_node");
++        }
++        struct device_node *np = of_parse_phandle(of_node, "sensor-subdev-handles", val);
++        // Then use this to find the i2c_client and v4l2_subdev
++        if(!np){
++            LOG( LOG_ERR, "Failed to get of_node for sensor subdev");
++        }
++        struct i2c_client *sensor_i2c_client = of_find_i2c_device_by_node(np);
++        if(!sensor_i2c_client){
++            LOG( LOG_ERR, "Failed to get i2c_client for sensor subdev");
++        }
++        struct v4l2_subdev *sensor_subdev = i2c_get_clientdata(sensor_i2c_client);
++        if(!sensor_subdev){
++            LOG( LOG_ERR, "Failed to get v4l2_subdev for sensor subdev");
++        }
++        ( SOC_SENSOR_SENSOR_ENTRY_ARR[val] )( &( s_ctx[val].camera_context ), &( s_ctx[val].camera_control ),sensor_subdev );
+         if ( s_ctx[val].camera_context == NULL ) {
+             LOG( LOG_ERR, "Failed to process camera_init for ctx:%d. Sensor is not initialized yet. camera_init must be called before", val );
+             rc = -1;
+@@ -358,6 +372,7 @@ static const struct v4l2_subdev_ops camera_ops = {
+ static int32_t soc_sensor_probe( struct platform_device *pdev )
+ {
+     int32_t rc = 0;
++    int i =0;
+ 
+     v4l2_subdev_init( &soc_sensor, &camera_ops );
+ 
+@@ -365,7 +380,45 @@ static int32_t soc_sensor_probe( struct platform_device *pdev )
+ 
+     snprintf( soc_sensor.name, V4L2_SUBDEV_NAME_SIZE, "%s", V4L2_SOC_SENSOR_NAME );
+ 
+-    soc_sensor.dev = &pdev->dev;
++    soc_sensor.dev = &pdev->dev; // Get the device node
++    // Make sure actual v4l2 sensor has been probed:
++    for(i=0; i < FIRMWARE_CONTEXT_NUMBER; i++ )
++    {
++        // Get the of_node for each sensor subdev
++        struct device_node *np = of_parse_phandle(soc_sensor.dev->of_node, "sensor-subdev-handles", i);
++        if(np)
++        {
++            LOG(LOG_INFO,"Sensor subdev of_node found for ctx %d", i);
++            struct i2c_client *client = NULL;
++            if (np) {
++                LOG(LOG_INFO,"Found phandle of subdev for ctx %d", i);
++                client = of_find_i2c_device_by_node(np);
++                if(client)
++                {
++                    LOG(LOG_INFO,"i2c client found for ctx %d", i);
++                    of_node_put(np); // Finished with the node
++                    if(!i2c_get_clientdata(client))
++                    {
++                        LOG(LOG_INFO,"i2c client data not found for ctx %d, deferring probe", i);
++                        return -EPROBE_DEFER; // Defer probe until all sensor subdevices are ready (i2c client data is available)
++                    }
++                    LOG(LOG_INFO,"i2c client data found for ctx %d, proceeding with subdev registration\n", i);
++                }
++            }
++        }
++        if( !soc_sensor.dev->of_node ) {
++            LOG( LOG_ERR, "Sensor subdev of_node not found for ctx %d\n", i );
++        }
++        else{
++            LOG( LOG_INFO, "Sensor subdev of_node found for ctx %d\n", i );
++        }
++    }
++    if( !soc_sensor.dev->of_node ) {
++        LOG( LOG_ERR, "Sensor subdev of_node not found\n" );
++    }
++    else{
++        LOG( LOG_INFO, "Sensor subdev of_node found\n" );
++    }
+     rc = v4l2_async_register_subdev( &soc_sensor );
+ 
+     LOG( LOG_NOTICE, "register v4l2 sensor device. result %d, sd 0x%x sd->dev 0x%x", rc, &soc_sensor, soc_sensor.dev );
+@@ -380,37 +433,37 @@ static int soc_sensor_remove( struct platform_device *pdev )
+     return 0;
+ }
+ 
+-static struct platform_device *soc_sensor_dev;
++static const struct of_device_id soc_sensor_of_match[] = {
++    { .compatible = "soc,sensor" },
++    { }
++};
++MODULE_DEVICE_TABLE(of, soc_sensor_of_match);
+ 
+ static struct platform_driver soc_sensor_driver = {
+     .probe = soc_sensor_probe,
+     .remove = soc_sensor_remove,
+     .driver = {
+         .name = "soc_sensor_v4l2",
++        .of_match_table = soc_sensor_of_match,
+         .owner = THIS_MODULE,
+     },
+ };
+ 
+-int __init acamera_camera_sensor_init( void )
++static int __init acamera_camera_sensor_init(void)
+ {
+     int rc = 0;
+-    LOG( LOG_INFO, "[KeyMsg] Sensor subdevice init" );
+-
+-    soc_sensor_dev = platform_device_register_simple(
+-        "soc_sensor_v4l2", -1, NULL, 0 );
+-    rc = platform_driver_register( &soc_sensor_driver );
+-
+-    LOG( LOG_INFO, "[KeyMsg] Sensor subdevice init done, rc: %d", rc );
++    LOG(LOG_INFO, "[KeyMsg] Sensor subdevice init");
++    rc = platform_driver_register(&soc_sensor_driver);
++     LOG( LOG_INFO, "[KeyMsg] Sensor subdevice init done, rc: %d", rc );
+     return rc;
+ }
+ 
+ 
+-void __exit acamera_camera_sensor_exit( void )
++static void __exit acamera_camera_sensor_exit(void)
+ {
+-    LOG( LOG_INFO, "[KeyMsg] Sensor subdevice exit" );
+-    platform_driver_unregister( &soc_sensor_driver );
+-    platform_device_unregister( soc_sensor_dev );
+-    LOG( LOG_INFO, "[KeyMsg] Sensor subdevice exit done" );
++    LOG(LOG_INFO, "[KeyMsg] Sensor subdevice exit");
++    platform_driver_unregister(&soc_sensor_driver);
++    LOG(LOG_INFO, "[KeyMsg] Sensor subdevice exit done");
+ }
+ 
+ 
+diff --git a/drivers/media/platform/renesas/rzv2h-isp/subdev/sensor/src/driver/sensor/v4l2_subdev_drv.c b/drivers/media/platform/renesas/rzv2h-isp/subdev/sensor/src/driver/sensor/v4l2_subdev_drv.c
+new file mode 100644
+index 000000000..e1543141f
+--- /dev/null
++++ b/drivers/media/platform/renesas/rzv2h-isp/subdev/sensor/src/driver/sensor/v4l2_subdev_drv.c
+@@ -0,0 +1,392 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Mali ISP sensor driver that forwards gain and exposure to a V4L2 sensor subdev
++ *
++ * Copyright (C) 2025 - IMD technologies
++ *
++ * Based on the Dummy_drv.c sensor template, Copyright (C) 2016-2022 ARM or its affiliates
++ */
++
++#include <linux/i2c.h>
++#include "acamera_types.h"
++#include "acamera_logger.h"
++#include "acamera_math.h"
++#include "acamera_command_api.h"
++#include "acamera_sbus_api.h"
++#include "system_sensor.h"
++#include "acamera_sensor_api.h"
++#include "system_timer.h"
++#include "acamera_firmware_config.h"
++#include "sensor_bus_config.h"
++#include <media/v4l2-subdev.h>
++#include <media/v4l2-ctrls.h>
++#include <media/v4l2-fwnode.h>
++#include <media/acamera_v4l2_bridge.h>
++
++#define LANE_MBPS 891
++#define PIXEL_AREA_1920x1080 {.horizontal = {0, 0, 0, 1920, 0, 0, 0}, .vertical = {0, 0, 0, 1080, 0, 0, 0}}
++#define MARGIN_BOTTOM 8
++
++typedef struct _sensor_context_t {
++    uint8_t address; // Sensor address for direct write (not used currently)
++    acamera_sbus_t sbus;
++    sensor_param_t param;
++    struct v4l2_subdev *v4l_subdev;
++    int32_t again_log2;
++    uint8_t again_change;
++    int32_t dgain_log2;
++    uint8_t dgain_change;
++    uint8_t exposure_change;
++    uint16_t int_time;
++} sensor_context_t;
++
++static sensor_context_t s_ctx[FIRMWARE_CONTEXT_NUMBER];
++static int ctx_counter = 0;
++static uint32_t reset_state = 0;
++
++static sensor_mode_t supported_modes[] = {
++      {
++        .wdr_mode = WDR_MODE_LINEAR,
++        .fps = 60 * 256,
++        .resolution.width = 1920,
++        .resolution.height = 1080,
++        .bits = 10,
++        .exposures = 1,
++        .seq_table_index = 0,
++        .sensor_settings = {
++            .pixel_area = PIXEL_AREA_1920x1080,
++            .mbps = LANE_MBPS,
++        }
++    }
++};
++
++//*************************************************************************************
++//--------------------DATA-------------------------------------------------------------
++//--------------------RESET------------------------------------------------------------
++static void sensor_hw_reset_enable( void )
++{
++    LOG( LOG_INFO, "V4L2 sensor hw_reset_enable called." );
++    reset_state &= ~( 1 << ( 2 * ( ctx_counter - 1 ) ) );
++    system_reset_sensor( reset_state );
++    system_timer_usleep( 10000 );
++}
++
++static void sensor_hw_reset_disable( void )
++{
++    LOG( LOG_INFO, "V4L2 sensor hw_reset_disable called." );
++    reset_state |= 1 << ( 2 * ( ctx_counter - 1 ) );
++    system_reset_sensor( reset_state );
++    system_timer_usleep( 10000 );
++}
++
++static int get_maximum_again(sensor_context_t * p_ctx)
++{
++    struct v4l2_ctrl *ctrl;
++    int32_t max_again = 0;
++
++    /* Find the control within the subdev's handler */
++    ctrl = v4l2_ctrl_find(p_ctx->v4l_subdev->ctrl_handler, V4L2_CID_ACAMERA_SET_AGAIN_LOG2);
++    if (ctrl)
++    {
++        max_again = ctrl->maximum;
++        LOG( LOG_INFO, "V4L2 sensor get_maximum_again: max_again=%d", max_again );
++    }
++    else
++    {
++        LOG( LOG_ERR, "V4L2 sensor get_maximum_again: control not found!" );
++    }
++    return max_again;
++}
++
++static int get_maximum_dgain(sensor_context_t * p_ctx)
++{
++    struct v4l2_ctrl *ctrl;
++    int32_t max_dgain = 0;
++
++    /* Find the control within the subdev's handler */
++    ctrl = v4l2_ctrl_find(p_ctx->v4l_subdev->ctrl_handler, V4L2_CID_ACAMERA_SET_DGAIN_LOG2);
++    if (ctrl)
++    {
++        max_dgain = ctrl->maximum;
++        LOG( LOG_INFO, "V4L2 sensor get_maximum_dgain: max_dgain=%d", max_dgain );
++    }
++    else
++    {
++        LOG( LOG_ERR, "V4L2 sensor get_maximum_dgain: control not found!" );
++    }
++    return max_dgain;
++}
++
++static int get_minimum_exposure(sensor_context_t * p_ctx)
++{
++    struct v4l2_ctrl *ctrl;
++    int32_t min_exposure = 0;
++
++    /* Find the control within the subdev's handler */
++    ctrl = v4l2_ctrl_find(p_ctx->v4l_subdev->ctrl_handler, V4L2_CID_ACAMERA_SENSOR_EXPOSURE_LINES);
++    if (ctrl)
++    {
++        min_exposure = ctrl->minimum;
++        LOG( LOG_INFO, "V4L2 sensor get_minimum_exposure: min_exposure=%d", min_exposure );
++    }
++    else
++    {
++        LOG( LOG_ERR, "V4L2 sensor get_minimum_exposure: control not found!" );
++    }
++    return min_exposure;
++}
++
++static int get_maximum_exposure(sensor_context_t * p_ctx)
++{
++    struct v4l2_ctrl *ctrl;
++    int32_t max_exposure = 0;
++
++    /* Find the control within the subdev's handler */
++    ctrl = v4l2_ctrl_find(p_ctx->v4l_subdev->ctrl_handler, V4L2_CID_ACAMERA_SENSOR_EXPOSURE_LINES);
++    if (ctrl)
++    {
++        max_exposure = ctrl->maximum;
++        LOG( LOG_INFO, "V4L2 sensor get_maximum_exposure: max_exposure=%d", max_exposure );
++    }
++    else
++    {
++        LOG( LOG_ERR, "V4L2 sensor get_maximum_exposure: control not found!" );
++    }
++    return max_exposure;
++}
++static int get_bayer_pattern(sensor_context_t * p_ctx)
++{
++    struct v4l2_ctrl *ctrl;
++    int32_t bayer_pattern = 0;
++
++    /* Find the control within the subdev's handler */
++    ctrl = v4l2_ctrl_find(p_ctx->v4l_subdev->ctrl_handler, V4L2_CID_ACAMERA_SENSOR_BAYER_FORMAT);
++    if (ctrl)
++    {
++        bayer_pattern = v4l2_ctrl_g_ctrl(ctrl);
++    }
++    else
++    {
++        LOG( LOG_ERR, "V4L2 sensor get_bayer_pattern: control not found!" );
++    }
++    return bayer_pattern;
++}
++
++//--------------------FLASH------------------------------------------------------------
++
++static int32_t sensor_alloc_analog_gain( void *ctx, int32_t gain )
++{
++    LOG( LOG_INFO, "V4L2 sensor alloc_analog_gain called." );
++    sensor_context_t *p_ctx = ctx;
++
++    if (gain > p_ctx->param.again_log2_max) {
++        gain = p_ctx->param.again_log2_max; 
++    }
++    
++    p_ctx->again_change = 1;
++    p_ctx->again_log2 = gain;
++
++    return gain;
++}
++
++static int32_t sensor_alloc_digital_gain( void *ctx, int32_t gain )
++{
++    LOG( LOG_INFO, "V4L2 sensor alloc_digital_gain called." );
++    sensor_context_t *p_ctx = ctx;
++
++    if (gain > p_ctx->param.dgain_log2_max){
++        gain = p_ctx->param.dgain_log2_max; 
++    }
++
++    p_ctx->dgain_change = 1;
++    p_ctx->dgain_log2 = gain;
++    return gain;
++}
++
++static void sensor_alloc_integration_time( void *ctx, uint16_t *int_time, uint16_t *int_time_M, uint16_t *int_time_L )
++{
++    LOG( LOG_INFO, "V4L2 sensor alloc_integration_time called. " );
++    sensor_context_t *p_ctx = ctx;
++    // Max exposure in lines for the current framerate
++
++    if ( *int_time < p_ctx->param.integration_time_min ) {
++        *int_time = p_ctx->param.integration_time_min;
++    } else if (*int_time > p_ctx->param.integration_time_max){
++        *int_time = p_ctx->param.integration_time_max;
++    }
++
++    p_ctx->exposure_change = 1;
++    p_ctx->int_time = *int_time;
++}
++
++static void sensor_update( void *ctx )
++{
++    LOG( LOG_INFO, "V4L2 sensor update called." );
++    if (ctx) {
++        sensor_context_t *p_ctx = ctx;
++        struct v4l2_ctrl *ctrl;
++        if ( p_ctx->exposure_change ) {
++            p_ctx->exposure_change = 0;
++            ctrl = v4l2_ctrl_find(p_ctx->v4l_subdev->ctrl_handler, V4L2_CID_ACAMERA_SENSOR_EXPOSURE_LINES);
++            if (ctrl)
++            {
++                v4l2_ctrl_s_ctrl(ctrl, p_ctx->int_time);
++            }
++        }
++
++        if ( p_ctx->again_change ) {
++            p_ctx->again_change = 0;
++            ctrl = v4l2_ctrl_find(p_ctx->v4l_subdev->ctrl_handler, V4L2_CID_ACAMERA_SET_AGAIN_LOG2);
++            if (ctrl)
++            {
++                v4l2_ctrl_s_ctrl(ctrl, p_ctx->again_log2);
++            }
++        }
++
++        if ( p_ctx->dgain_change ) {
++            p_ctx->dgain_change = 0;
++            ctrl = v4l2_ctrl_find(p_ctx->v4l_subdev->ctrl_handler, V4L2_CID_ACAMERA_SET_DGAIN_LOG2);
++            if (ctrl)
++            {
++               v4l2_ctrl_s_ctrl(ctrl, p_ctx->dgain_log2);
++            }
++        }
++
++        LOG(LOG_INFO, "Sensor update: again_log2=%d dgain_log2=%d int_time=%u",
++            p_ctx->again_log2, p_ctx->dgain_log2, p_ctx->int_time);
++    }
++}
++
++static void sensor_set_mode( void *ctx, uint8_t mode )
++{
++    LOG( LOG_INFO, "V4L2 sensor set_mode called. mode: %d", mode );
++    sensor_context_t *p_ctx = ctx;
++    sensor_param_t *param = &p_ctx->param;
++
++    param->active.width = 1920;
++    param->active.height = 1080;
++    param->total.width = 1920;
++    param->total.height = 1080;
++    param->pixels_per_line = param->total.width;
++    param->integration_time_min = get_minimum_exposure(p_ctx);
++    param->integration_time_max = get_maximum_exposure(p_ctx);
++    param->integration_time_limit = get_maximum_exposure(p_ctx);
++    param->mode = mode;
++    param->lines_per_second = 0;
++    param->sensor_exp_number = param->modes_table[mode].exposures;
++}
++
++static uint16_t sensor_get_id( void *ctx )
++{
++    LOG( LOG_INFO, "V4L2 sensor get_id called. returning 0xffff" );
++    return 0xFFFF;
++}
++
++static const sensor_param_t *sensor_get_parameters( void *ctx )
++{
++    sensor_context_t *p_ctx = ctx;
++
++    LOG( LOG_INFO, "V4L2 sensor get_parameters called." );
++    return (const sensor_param_t *)&p_ctx->param;
++}
++
++static void sensor_disable_isp( void *ctx )
++{
++    LOG( LOG_INFO, "V4L2 sensor disable_isp called." );
++}
++
++static uint32_t read_register( void *ctx, uint32_t address )
++{
++    LOG( LOG_INFO, "V4L2 sensor read_register called. address: 0x%08x", address );
++    return 0;
++}
++
++static void write_register( void *ctx, uint32_t address, uint32_t data )
++{
++    LOG( LOG_INFO, "V4L2 sensor write_register called. address: 0x%08x, data: 0x%08x", address, data );
++}
++
++static void stop_streaming( void *ctx )
++{
++    sensor_context_t *p_ctx = ctx;
++    v4l2_subdev_call(p_ctx->v4l_subdev, video, s_stream, false);
++}
++
++static void start_streaming( void *ctx )
++{
++    sensor_context_t *p_ctx = ctx;
++    v4l2_subdev_call(p_ctx->v4l_subdev, video, s_stream, true);
++}
++
++void sensor_deinit_v4l2_subdev( void *ctx )
++{
++    LOG( LOG_INFO, "V4L2 sensor deinit called." );
++    if ( ctx ) {
++        sensor_context_t *p_ctx = ctx;
++        acamera_sbus_deinit( &p_ctx->sbus, sbus_i2c );
++
++        if ( --ctx_counter < 0 )
++            LOG( LOG_ERR, "Sensor context pointer is negative %d", ctx_counter );
++
++        if ( ctx_counter <= 0 ) {
++            reset_state = 0;
++            ctx_counter = 0;
++            reset_sensor_bus_counter();
++        }
++    }
++}
++//--------------------Initialization------------------------------------------------------------
++void sensor_init_v4l2_subdev( void **ctx, sensor_control_t *ctrl, const struct v4l2_subdev *sd)
++{
++    if ( ctx_counter < FIRMWARE_CONTEXT_NUMBER ) {
++        sensor_context_t *p_ctx = &s_ctx[ctx_counter];
++        ctx_counter++;
++
++        p_ctx->sbus.bus = get_next_sensor_bus_address();
++        p_ctx->sbus.device = 0; // Placeholder, this is a wrapper driver
++        p_ctx->sbus.mask = SBUS_MASK_SAMPLE_8BITS | SBUS_MASK_ADDR_16BITS | SBUS_MASK_ADDR_SWAP_BYTES | SBUS_MASK_NO_STOP;
++        if(!sd) {
++            LOG( LOG_ERR, "sensor_init_v4l2_subdev: v4l2_subdev is NULL!" );
++        }
++        LOG(LOG_INFO," sensor_init_v4l2_subdev: sd name=%s", sd->name);
++        p_ctx->v4l_subdev = (struct v4l2_subdev *)sd; // Store the subdev handle
++        acamera_sbus_init( &p_ctx->sbus, sbus_i2c );
++
++        p_ctx->param.rggb_start = get_bayer_pattern(p_ctx);
++        p_ctx->param.sensor_exp_number = 1;
++        p_ctx->param.again_log2_max = get_maximum_again(p_ctx);
++        p_ctx->param.dgain_log2_max = get_maximum_dgain(p_ctx);
++        p_ctx->param.integration_time_apply_delay = 2;
++        p_ctx->param.isp_exposure_channel_delay = 0;
++        p_ctx->param.modes_table = supported_modes;
++        p_ctx->param.modes_num = 1;
++        p_ctx->param.mode = 0;
++        p_ctx->param.integration_time_min = get_minimum_exposure(p_ctx);  // 1 line
++        p_ctx->param.integration_time_max = get_maximum_exposure(p_ctx);  // VMAX for 60fps
++        p_ctx->param.integration_time_limit = get_maximum_exposure(p_ctx);
++        p_ctx->param.sensor_ctx = p_ctx;
++        ctrl->alloc_analog_gain = sensor_alloc_analog_gain;
++        ctrl->alloc_digital_gain = sensor_alloc_digital_gain;
++        ctrl->alloc_integration_time = sensor_alloc_integration_time;
++        ctrl->sensor_update = sensor_update;
++        ctrl->set_mode = sensor_set_mode;
++        ctrl->get_id = sensor_get_id;
++        ctrl->get_parameters = sensor_get_parameters;
++        ctrl->disable_sensor_isp = sensor_disable_isp;
++        ctrl->read_sensor_register = read_register;
++        ctrl->write_sensor_register = write_register;
++        ctrl->start_streaming = start_streaming;
++        ctrl->stop_streaming = stop_streaming;
++        // Reset sensor during initialization
++        sensor_hw_reset_enable();
++        sensor_hw_reset_disable();
++
++        *ctx = p_ctx;
++
++    } else {
++        LOG( LOG_ERR, "Attempt to initialize more sensor instances than was configured. Sensor initialization failed." );
++        *ctx = NULL;
++    }
++}
++
++//*************************************************************************************
+diff --git a/drivers/media/platform/renesas/rzv2h-isp/subdev/sensor/src/fw/runtime_initialization_settings.h b/drivers/media/platform/renesas/rzv2h-isp/subdev/sensor/src/fw/runtime_initialization_settings.h
+index 7265328cb..8626f6f44 100644
+--- a/drivers/media/platform/renesas/rzv2h-isp/subdev/sensor/src/fw/runtime_initialization_settings.h
++++ b/drivers/media/platform/renesas/rzv2h-isp/subdev/sensor/src/fw/runtime_initialization_settings.h
+@@ -35,6 +35,10 @@ extern uint32_t get_calibrations_imx415( uint32_t ctx_num, void *sensor_arg, ACa
+ 
+ #endif // FIRMWARE_CONTEXT_NUMBER == 2
+ 
+-#define SENSOR_INIT_SUBDEV_FUNCTIONS {sensor_init_imx415, sensor_init_imx415, }
+-#define SENSOR_DEINIT_SUBDEV_FUNCTIONS {sensor_deinit_imx415, sensor_deinit_imx415, }
++struct v4l2_subdev;
++extern void sensor_init_v4l2_subdev( void **ctx, sensor_control_t *, const struct v4l2_subdev *sd );
++extern void sensor_deinit_v4l2_subdev( void *ctx );
++
++#define SENSOR_INIT_SUBDEV_FUNCTIONS {sensor_init_v4l2_subdev, sensor_init_v4l2_subdev, }
++#define SENSOR_DEINIT_SUBDEV_FUNCTIONS {sensor_deinit_v4l2_subdev, sensor_deinit_v4l2_subdev, }
+ #define CALIBRATION_SUBDEV_FUNCTIONS {get_calibrations_imx415, get_calibrations_imx415,}
+diff --git a/drivers/media/platform/renesas/rzv2h-isp/v4l2_dev/app/main_kernel_v4l2.c b/drivers/media/platform/renesas/rzv2h-isp/v4l2_dev/app/main_kernel_v4l2.c
+index 3992d4f1b..1363f9736 100644
+--- a/drivers/media/platform/renesas/rzv2h-isp/v4l2_dev/app/main_kernel_v4l2.c
++++ b/drivers/media/platform/renesas/rzv2h-isp/v4l2_dev/app/main_kernel_v4l2.c
+@@ -96,6 +96,25 @@ struct acamera_v4l2_subdev_t {
+ 
+ static struct acamera_v4l2_subdev_t g_subdevs;
+ 
++/* Custom match function to only match SOC subdevices */
++static bool acamera_camera_async_match_soc(struct device *dev, struct v4l2_async_subdev *asd)
++{
++	/* Match platform devices with names starting with "soc_" */
++	if (dev && dev->driver && dev->driver->name) {
++		LOG(LOG_DEBUG, "Checking subdev driver: %s", dev->driver->name);
++		if (strncmp(dev->driver->name, "soc_", 4) == 0) {
++			LOG(LOG_DEBUG, "MATCHED SOC subdev driver: %s", dev->driver->name);
++			return true;
++		} else {
++			LOG(LOG_DEBUG, "REJECTED non-SOC subdev driver: %s", dev->driver->name);
++		}
++	} else {
++		LOG(LOG_DEBUG, "Checking subdev with no driver name (dev=%p, driver=%p)",
++		    dev, dev ? dev->driver : NULL);
++	}
++
++	return false;
++}
+ 
+ void *acamera_camera_v4l2_get_subdev_by_name( const char *name )
+ {
+@@ -460,7 +479,8 @@ static int32_t isp_platform_probe( struct platform_device *pdev )
+ 
+     for ( idx = 0; idx < V4L2_SOC_SUBDEV_NUMBER; idx++ ) {
+         g_subdevs.soc_async_sd[idx].match_type = V4L2_ASYNC_MATCH_CUSTOM;
+-        g_subdevs.soc_async_sd[idx].match.custom.match = NULL;
++        g_subdevs.soc_async_sd[idx].match.custom.match = acamera_camera_async_match_soc;
++
+         g_subdevs.soc_async_sd_ptr[idx] = &g_subdevs.soc_async_sd[idx];
+         g_subdevs.soc_subdevs[idx] = 0;
+ #if ( LINUX_VERSION_CODE >= KERNEL_VERSION( 4, 20, 0 ) )
+diff --git a/include/media/acamera_v4l2_bridge.h b/include/media/acamera_v4l2_bridge.h
+new file mode 100644
+index 000000000..98fc97e1e
+--- /dev/null
++++ b/include/media/acamera_v4l2_bridge.h
+@@ -0,0 +1,26 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * acamera_v4l2_bridge - Shared interface between V4L2 drivers and acamera
++ *
++ * Copyright (C) 2025 - IMD technologies
++ *
++ */
++
++#ifndef __ACAMERA_V4L2_BRIDGE_H__
++#define __ACAMERA_V4L2_BRIDGE_H__
++
++#include <media/v4l2-ctrls.h>
++#include <media/v4l2-device.h>
++#include <media/v4l2-fwnode.h>
++
++#define V4L2_CID_ACAMERA_SET_AGAIN_LOG2 (V4L2_CID_USER_BASE + 0x1002) // Set analog gain in log2 fixed-point format
++#define V4L2_CID_ACAMERA_SET_DGAIN_LOG2 (V4L2_CID_USER_BASE + 0x1003) // Set digital gain in log2 fixed-point format
++#define V4L2_CID_ACAMERA_LINE_DURATION_NANOSECONDS (V4L2_CID_USER_BASE + 0x1004) // Line duration in nanoseconds
++#define V4L2_CID_ACAMERA_FRAME_LINES_PER_SECOND (V4L2_CID_USER_BASE + 0x1005) // Lines per second
++#define V4L2_CID_ACAMERA_SENSOR_MAX_VMAX_LINES (V4L2_CID_USER_BASE + 0x1006) // Maximum vertical size (total lines per frame)
++#define V4L2_CID_ACAMERA_SENSOR_MAX_HMAX_PIXELS (V4L2_CID_USER_BASE + 0x1007) // Maximum horizontal size (total pixels per
++#define V4L2_CID_ACAMERA_SENSOR_BAYER_FORMAT (V4L2_CID_USER_BASE + 0x1008) // Bayer format  -- see acamera
++#define V4L2_CID_ACAMERA_SENSOR_EXPOSURE_LINES (V4L2_CID_USER_BASE + 0x1009) //  exposure time in lines
++
++
++#endif /* __ACAMERA_V4L2_BRIDGE_H__ */
+diff --git a/include/media/rzv2h-ivc.h b/include/media/rzv2h-ivc.h
+index 0bdb8aee9..badc7a38f 100755
+--- a/include/media/rzv2h-ivc.h
++++ b/include/media/rzv2h-ivc.h
+@@ -23,7 +23,7 @@
+ #define __RZV2H_IVC__
+ 
+ #define N_MAX_IVC_VB2_BUFS   (20)  /* Max # of buffers */
+-#define N_DEF_IVC_VB2_BUFS   (5)  /* Default # of buffers. Recommended to be equal or larger than cru->num_buf */
++#define N_DEF_IVC_VB2_BUFS   (12)  /* Default # of buffers. Recommended to be equal or larger than cru->num_buf */
+ #define IVC_IS_DRIVEN_BY_ISP_IRQ  (1) /* If 1, next frame is triggerd by ISP rather than IVC */
+ 
+ #define IVC_WDR_MODE_LINEAR                                   0x00000000
+-- 
+2.43.0
+

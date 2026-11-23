@@ -1,0 +1,154 @@
+From 4a58912a1040a3d454907db0763019523af6d245 Mon Sep 17 00:00:00 2001
+From: Andrei Smirnov <andrei.smirnov@imd-tec.com>
+Date: Wed, 21 Oct 2026 11:59:45 +0100
+Subject: [PATCH] arm64: dts: renesas: r9a09g056: add ISP and match the RZ/V2H
+ CRU bindings
+
+Add the input video control, Mali-C55 ISP and ISP sensor/lens/iq nodes
+to RZ/V2N, and describe CRU0/1 and CSI20/21 the way the CRU and CSI-2
+drivers from the ISP support package expect: r9a09g057-cru fallback
+compatible, "apb"/"axi" clock names, cru_0/1_pclk as the CSI-2 "apb"
+clock and the three named CRU interrupts. Interrupt numbers, clocks and
+resets are those of r9a09g057.
+
+Rename the imdt-v2n-sbc ISP reserved-memory node to isp_reserved, as on
+imdt-v2h-sbc.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/arm64/boot/dts/renesas/imdt-v2n-sbc.dts |  2 +-
+ arch/arm64/boot/dts/renesas/r9a09g056.dtsi   | 69 +++++++++++++++++---
+ 2 files changed, 60 insertions(+), 11 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/renesas/imdt-v2n-sbc.dts b/arch/arm64/boot/dts/renesas/imdt-v2n-sbc.dts
+index 54e5fa991712..1f26790311bf 100644
+--- a/arch/arm64/boot/dts/renesas/imdt-v2n-sbc.dts
++++ b/arch/arm64/boot/dts/renesas/imdt-v2n-sbc.dts
+@@ -39,7 +39,7 @@ mmp_reserved: linux,multimedia {
+ 			reg = <0x0 0x80000000 0x0 0x10000000>;
+ 		};
+ 
+-		isp: isp@90000000 {
++		isp_reserved: frame_buffer@90000000 {
+ 			compatible = "shared-dma-pool";
+ 			reusable;
+ 			reg = <0x0 0x90000000 0x0 0x18000000>;
+diff --git a/arch/arm64/boot/dts/renesas/r9a09g056.dtsi b/arch/arm64/boot/dts/renesas/r9a09g056.dtsi
+index 70cc5fc22a15..fe21f32989fd 100644
+--- a/arch/arm64/boot/dts/renesas/r9a09g056.dtsi
++++ b/arch/arm64/boot/dts/renesas/r9a09g056.dtsi
+@@ -781,6 +781,53 @@ wdt3: watchdog@13000400 {
+ 			status = "disabled";
+ 		};
+ 
++		input_video_control: input_video_control@16040000 {
++			compatible = "renesas,rzv2h-ivc";
++			reg = <0x0 0x16040000 0x0 0x00010000>;
++			clocks = <&cpg CPG_MOD 0xe3>;
++			clock-names = "pclk";
++			resets = <&cpg 0xd4>;
++			reset-names = "presetn";
++			interrupts = <GIC_SPI 860 IRQ_TYPE_EDGE_RISING>;
++			interrupt-names = "IVC";
++			status = "disabled";
++		};
++
++		isp: isp@16080000 {
++			compatible = "arm,isp";
++			reg = <0x0 0x16080000 0x0 0x00400000>;
++			clocks = <&cpg CPG_MOD 0xe2>,
++				 <&cpg CPG_MOD 0xe4>,
++				 <&cpg CPG_MOD 0xe5>;
++			clock-names = "reg_aclk", "vin_aclk", "isp_sclk";
++			resets = <&cpg 0xd2>,
++				 <&cpg 0xd1>,
++				 <&cpg 0xd3>;
++			reset-names = "reg_aresetn", "vin_aresetn", "isp_sresetn";
++			interrupts = <GIC_SPI 859 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "ISP";
++			memory-region = <&isp_reserved>;
++			status = "disabled";
++		};
++
++		sensor: soc_sensor@16284000 {
++			compatible = "soc,sensor";
++			reg = <0x0 0x16284000 0x0 0x001000>;
++			status = "disabled";
++		};
++
++		lens: soc_lens@16280000 {
++			compatible = "soc,lens";
++			reg = <0x0 0x16280000 0x0 0x001000>;
++			status = "disabled";
++		};
++
++		iq: soc_iq@16286000 {
++			compatible = "soc,iq";
++			reg = <0x0 0x16286000 0x0 0x001000>;
++			status = "disabled";
++		};
++
+ 		fcpcs: vcp4@16410000 {
+ 			compatible = "renesas,vcp4-fcpcs";
+ 			reg = <0 0x16410000 0 0x1000>;
+@@ -2609,13 +2656,14 @@ queue3 {
+ 		};
+ 
+ 		cru0: vide0@16000000 {
+-			compatible = "renesas,r9a09g056-cru", "renesas,rzv2n-cru";
++			compatible = "renesas,r9a09g056-cru", "renesas,r9a09g057-cru";
+ 			reg = <0 0x16000000 0 0x400>;
+ 			clocks = <&cpg CPG_MOD 0xd3>,
+ 				 <&cpg CPG_MOD 0xd4>,
+ 				 <&cpg CPG_MOD 0xd2>;
+-			clock-names = "video", "pclk", "aclk";
+-			interrupts = <GIC_SPI 838 IRQ_TYPE_LEVEL_HIGH>;
++			clock-names = "video", "apb", "axi";
++			interrupts = <GIC_SPI 838 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 842 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 839 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "image_conv_int", "cru_vsd_addr_wend", "axi_mst_err_int";
+ 			resets = <&cpg 0xc5>,
+ 				 <&cpg 0xc6>;
+ 			reset-names = "presetn", "aresetn";
+@@ -2638,13 +2686,14 @@ cru0_to_csi20: endpoint {
+ 		};
+ 
+ 		cru1: video1@16010000 {
+-			compatible = "renesas,r9a09g056-cru", "renesas,rzv2n-cru";
++			compatible = "renesas,r9a09g056-cru", "renesas,r9a09g057-cru";
+ 			reg = <0 0x16010000 0 0x400>;
+ 			clocks = <&cpg CPG_MOD 0xd6>,
+ 				 <&cpg CPG_MOD 0xd7>,
+ 				 <&cpg CPG_MOD 0xd5>;
+-			clock-names = "video", "pclk", "aclk";
+-			interrupts = <GIC_SPI 844 IRQ_TYPE_LEVEL_HIGH>;
++			clock-names = "video", "apb", "axi";
++			interrupts = <GIC_SPI 844 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 848 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 845 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "image_conv_int", "cru_vsd_addr_wend", "axi_mst_err_int";
+ 			resets = <&cpg 0xc8>,
+ 				 <&cpg 0xc9>;
+ 			reset-names = "presetn", "aresetn";
+@@ -2671,8 +2720,8 @@ csi20: csi20@16000400 {
+ 			reg = <0 0x16000400 0 0xc00>;
+ 			interrupts = <GIC_SPI 837 IRQ_TYPE_LEVEL_HIGH>;
+ 			clocks = <&cpg CPG_MOD 0xd3>,
+-				 <&cpg CPG_MOD 0xde>;
+-			clock-names = "video", "system";
++				 <&cpg CPG_MOD 0xd4>;
++			clock-names = "video", "apb";
+ 			resets = <&cpg 0xc5>,
+ 				 <&cpg 0xc7>;
+ 			reset-names = "presetn", "cmn-rstb";
+@@ -2698,8 +2747,8 @@ csi21: csi21@16010400 {
+ 			reg = <0 0x16010400 0 0xc00>;
+ 			interrupts = <GIC_SPI 843 IRQ_TYPE_LEVEL_HIGH>;
+ 			clocks = <&cpg CPG_MOD 0xd6>,
+-				 <&cpg CPG_MOD 0xdf>;
+-			clock-names = "video", "system";
++				 <&cpg CPG_MOD 0xd7>;
++			clock-names = "video", "apb";
+ 			resets = <&cpg 0xc8>,
+ 				 <&cpg 0xca>;
+ 			reset-names = "presetn", "cmn-rstb";
+-- 
+2.43.0
+

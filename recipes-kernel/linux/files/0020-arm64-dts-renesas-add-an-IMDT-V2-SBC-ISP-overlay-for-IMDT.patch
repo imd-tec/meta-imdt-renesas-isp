@@ -1,0 +1,74 @@
+From 338436da8cf763943b068554939f1c650114546f Mon Sep 17 00:00:00 2001
+From: Andrei Smirnov <andrei.smirnov@imd-tec.com>
+Date: Fri, 20 Nov 2026 15:11:32 +0000
+Subject: [PATCH] arm64: dts: renesas: add an IMDT V2 SBC ISP overlay for the
+ CSI0 AP1302
+
+Enables the RZ/V2H or RZ/V2N ISP on CRU0 with the AP1302 on CSI0 as its
+raw source.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ arch/arm64/boot/dts/renesas/Makefile          |  2 ++
+ .../renesas/imdt-v2-sbc-ap1302-csi0-isp.dts   | 31 +++++++++++++++++++
+ 2 files changed, 33 insertions(+)
+ create mode 100644 arch/arm64/boot/dts/renesas/imdt-v2-sbc-ap1302-csi0-isp.dts
+
+diff --git a/arch/arm64/boot/dts/renesas/Makefile b/arch/arm64/boot/dts/renesas/Makefile
+index 92fdaf1e4..3d2cedf97 100644
+--- a/arch/arm64/boot/dts/renesas/Makefile
++++ b/arch/arm64/boot/dts/renesas/Makefile
+@@ -96,6 +96,7 @@ dtb-$(CONFIG_ARCH_R9A09G056) += imdt-v2-sbc-dsi-panel.dtbo
+ dtb-$(CONFIG_ARCH_R9A09G056) += imdt-v2-sbc-dsi-hdmi.dtbo
+ dtb-$(CONFIG_ARCH_R9A09G056) += imdt-v2-sbc-ar1335-csi2.dtbo
+ dtb-$(CONFIG_ARCH_R9A09G056) += imdt-v2-sbc-ar1335-csi3.dtbo
++dtb-$(CONFIG_ARCH_R9A09G056) += imdt-v2-sbc-ap1302-csi0-isp.dtbo
+ 
+ dtb-$(CONFIG_ARCH_R9A09G047) += r9a09g047e57-smarc.dtb
+ 
+@@ -113,4 +114,5 @@ dtb-$(CONFIG_ARCH_R9A09G057) += imdt-v2-sbc-ar1335-csi2.dtbo
+ dtb-$(CONFIG_ARCH_R9A09G057) += imdt-v2-sbc-ar1335-csi2-isp.dtbo
+ dtb-$(CONFIG_ARCH_R9A09G057) += imdt-v2-sbc-ar1335-csi3-isp.dtbo
+ dtb-$(CONFIG_ARCH_R9A09G057) += imdt-v2-sbc-ar1335-dual-isp.dtbo
++dtb-$(CONFIG_ARCH_R9A09G057) += imdt-v2-sbc-ap1302-csi0-isp.dtbo
+ dtb-$(CONFIG_ARCH_R9A09G057) += imdt-v2-sbc-ar1335-csi3.dtbo
+diff --git a/arch/arm64/boot/dts/renesas/imdt-v2-sbc-ap1302-csi0-isp.dts b/arch/arm64/boot/dts/renesas/imdt-v2-sbc-ap1302-csi0-isp.dts
+new file mode 100644
+index 000000000..d2342807d
+--- /dev/null
++++ b/arch/arm64/boot/dts/renesas/imdt-v2-sbc-ap1302-csi0-isp.dts
+@@ -0,0 +1,31 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * RZ/V2H and RZ/V2N ISP on CRU0, fed by the AP1302 on CSI0 in raw (SGRBG8) passthrough.
++ *
++ * Copyright (C) 2026 - IMD technologies
++ */
++/dts-v1/;
++/plugin/;
++
++&input_video_control {
++	crus = <&cru0>;
++	status = "okay";
++};
++
++&isp {
++	sensor-i2c = <&ap1302_csi20>;
++	sensor-default-preset-mode = <0>;
++	status = "okay";
++};
++
++&sensor {
++	status = "okay";
++};
++
++&lens {
++	status = "okay";
++};
++
++&iq {
++	status = "okay";
++};
+-- 
+2.43.0
+

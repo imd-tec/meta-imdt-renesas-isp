@@ -1,0 +1,33 @@
+From 7cce033a8bdf9f2ac8097c02dc7398f1dc18a1e8 Mon Sep 17 00:00:00 2001
+From: Andrei Smirnov <andrei.smirnov@imd-tec.com>
+Date: Fri, 16 Oct 2026 11:40:29 +0100
+Subject: [PATCH] media: v4l2-async: don't fwnode-match subdevs without a
+ fwnode
+
+The RZ/V2H ISP registers its lens, sensor and iq subdevs from platform
+devices without a firmware node. match_fwnode() dereferenced
+sd->fwnode->secondary for them whenever a notifier still had a fwnode
+match pending.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ drivers/media/v4l2-core/v4l2-async.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/drivers/media/v4l2-core/v4l2-async.c b/drivers/media/v4l2-core/v4l2-async.c
+index 2163f44bedd9..3658bd4c785b 100644
+--- a/drivers/media/v4l2-core/v4l2-async.c
++++ b/drivers/media/v4l2-core/v4l2-async.c
+@@ -149,6 +149,9 @@ match_fwnode_one(struct v4l2_async_notifier *notifier,
+ static bool match_fwnode(struct v4l2_async_notifier *notifier,
+ 			 struct v4l2_subdev *sd, struct v4l2_async_subdev *asd)
+ {
++	if (!sd->fwnode)
++		return false;
++
+ 	if (match_fwnode_one(notifier, sd, sd->fwnode, asd))
+ 		return true;
+ 
+-- 
+2.43.0
+

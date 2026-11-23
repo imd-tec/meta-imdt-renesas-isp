@@ -1,0 +1,142 @@
+From aab9f6eab08b960296442cb3c6879c952f08af35 Mon Sep 17 00:00:00 2001
+From: Andrei Smirnov <andrei.smirnov@imd-tec.com>
+Date: Thu, 22 Oct 2026 14:08:45 +0100
+Subject: [PATCH 6/6] media: rzv2h-isp: run without a sensor subdev
+
+Without a sensor subdev, camera_init() skips the I2C client lookup and the
+V4L2 sensor driver skips the subdev controls and uses the GRBG Bayer order.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../rzv2h-isp/subdev/sensor/app/soc_sensor.c  |  4 +--
+ .../src/driver/sensor/v4l2_subdev_drv.c       | 30 +++++++++++++------
+ 2 files changed, 23 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/media/platform/renesas/rzv2h-isp/subdev/sensor/app/soc_sensor.c b/drivers/media/platform/renesas/rzv2h-isp/subdev/sensor/app/soc_sensor.c
+index a37871e98..097b11a38 100644
+--- a/drivers/media/platform/renesas/rzv2h-isp/subdev/sensor/app/soc_sensor.c
++++ b/drivers/media/platform/renesas/rzv2h-isp/subdev/sensor/app/soc_sensor.c
+@@ -92,11 +92,11 @@ static int camera_init( struct v4l2_subdev *sd, u32 val )
+         if(!np){
+             LOG( LOG_ERR, "Failed to get of_node for sensor subdev");
+         }
+-        struct i2c_client *sensor_i2c_client = of_find_i2c_device_by_node(np);
++        struct i2c_client *sensor_i2c_client = np ? of_find_i2c_device_by_node(np) : NULL;
+         if(!sensor_i2c_client){
+             LOG( LOG_ERR, "Failed to get i2c_client for sensor subdev");
+         }
+-        struct v4l2_subdev *sensor_subdev = i2c_get_clientdata(sensor_i2c_client);
++        struct v4l2_subdev *sensor_subdev = sensor_i2c_client ? i2c_get_clientdata(sensor_i2c_client) : NULL;
+         if(!sensor_subdev){
+             LOG( LOG_ERR, "Failed to get v4l2_subdev for sensor subdev");
+         }
+diff --git a/drivers/media/platform/renesas/rzv2h-isp/subdev/sensor/src/driver/sensor/v4l2_subdev_drv.c b/drivers/media/platform/renesas/rzv2h-isp/subdev/sensor/src/driver/sensor/v4l2_subdev_drv.c
+index e1543141f..4c86621a4 100644
+--- a/drivers/media/platform/renesas/rzv2h-isp/subdev/sensor/src/driver/sensor/v4l2_subdev_drv.c
++++ b/drivers/media/platform/renesas/rzv2h-isp/subdev/sensor/src/driver/sensor/v4l2_subdev_drv.c
+@@ -79,13 +79,21 @@ static void sensor_hw_reset_disable( void )
+     system_timer_usleep( 10000 );
+ }
+ 
++/* The sensor subdev is optional; without one its controls are unavailable. */
++static struct v4l2_ctrl *sensor_ctrl(sensor_context_t *p_ctx, u32 id)
++{
++    if (!p_ctx->v4l_subdev)
++        return NULL;
++    return v4l2_ctrl_find(p_ctx->v4l_subdev->ctrl_handler, id);
++}
++
+ static int get_maximum_again(sensor_context_t * p_ctx)
+ {
+     struct v4l2_ctrl *ctrl;
+     int32_t max_again = 0;
+ 
+     /* Find the control within the subdev's handler */
+-    ctrl = v4l2_ctrl_find(p_ctx->v4l_subdev->ctrl_handler, V4L2_CID_ACAMERA_SET_AGAIN_LOG2);
++    ctrl = sensor_ctrl(p_ctx, V4L2_CID_ACAMERA_SET_AGAIN_LOG2);
+     if (ctrl)
+     {
+         max_again = ctrl->maximum;
+@@ -104,7 +112,7 @@ static int get_maximum_dgain(sensor_context_t * p_ctx)
+     int32_t max_dgain = 0;
+ 
+     /* Find the control within the subdev's handler */
+-    ctrl = v4l2_ctrl_find(p_ctx->v4l_subdev->ctrl_handler, V4L2_CID_ACAMERA_SET_DGAIN_LOG2);
++    ctrl = sensor_ctrl(p_ctx, V4L2_CID_ACAMERA_SET_DGAIN_LOG2);
+     if (ctrl)
+     {
+         max_dgain = ctrl->maximum;
+@@ -123,7 +131,7 @@ static int get_minimum_exposure(sensor_context_t * p_ctx)
+     int32_t min_exposure = 0;
+ 
+     /* Find the control within the subdev's handler */
+-    ctrl = v4l2_ctrl_find(p_ctx->v4l_subdev->ctrl_handler, V4L2_CID_ACAMERA_SENSOR_EXPOSURE_LINES);
++    ctrl = sensor_ctrl(p_ctx, V4L2_CID_ACAMERA_SENSOR_EXPOSURE_LINES);
+     if (ctrl)
+     {
+         min_exposure = ctrl->minimum;
+@@ -142,7 +150,7 @@ static int get_maximum_exposure(sensor_context_t * p_ctx)
+     int32_t max_exposure = 0;
+ 
+     /* Find the control within the subdev's handler */
+-    ctrl = v4l2_ctrl_find(p_ctx->v4l_subdev->ctrl_handler, V4L2_CID_ACAMERA_SENSOR_EXPOSURE_LINES);
++    ctrl = sensor_ctrl(p_ctx, V4L2_CID_ACAMERA_SENSOR_EXPOSURE_LINES);
+     if (ctrl)
+     {
+         max_exposure = ctrl->maximum;
+@@ -160,11 +168,15 @@ static int get_bayer_pattern(sensor_context_t * p_ctx)
+     int32_t bayer_pattern = 0;
+ 
+     /* Find the control within the subdev's handler */
+-    ctrl = v4l2_ctrl_find(p_ctx->v4l_subdev->ctrl_handler, V4L2_CID_ACAMERA_SENSOR_BAYER_FORMAT);
++    ctrl = sensor_ctrl(p_ctx, V4L2_CID_ACAMERA_SENSOR_BAYER_FORMAT);
+     if (ctrl)
+     {
+         bayer_pattern = v4l2_ctrl_g_ctrl(ctrl);
+     }
++    else if (!p_ctx->v4l_subdev)
++    {
++        bayer_pattern = 1; /* GRBG, the AR1335 order */
++    }
+     else
+     {
+         LOG( LOG_ERR, "V4L2 sensor get_bayer_pattern: control not found!" );
+@@ -227,7 +239,7 @@ static void sensor_update( void *ctx )
+         struct v4l2_ctrl *ctrl;
+         if ( p_ctx->exposure_change ) {
+             p_ctx->exposure_change = 0;
+-            ctrl = v4l2_ctrl_find(p_ctx->v4l_subdev->ctrl_handler, V4L2_CID_ACAMERA_SENSOR_EXPOSURE_LINES);
++            ctrl = sensor_ctrl(p_ctx, V4L2_CID_ACAMERA_SENSOR_EXPOSURE_LINES);
+             if (ctrl)
+             {
+                 v4l2_ctrl_s_ctrl(ctrl, p_ctx->int_time);
+@@ -236,7 +248,7 @@ static void sensor_update( void *ctx )
+ 
+         if ( p_ctx->again_change ) {
+             p_ctx->again_change = 0;
+-            ctrl = v4l2_ctrl_find(p_ctx->v4l_subdev->ctrl_handler, V4L2_CID_ACAMERA_SET_AGAIN_LOG2);
++            ctrl = sensor_ctrl(p_ctx, V4L2_CID_ACAMERA_SET_AGAIN_LOG2);
+             if (ctrl)
+             {
+                 v4l2_ctrl_s_ctrl(ctrl, p_ctx->again_log2);
+@@ -245,7 +257,7 @@ static void sensor_update( void *ctx )
+ 
+         if ( p_ctx->dgain_change ) {
+             p_ctx->dgain_change = 0;
+-            ctrl = v4l2_ctrl_find(p_ctx->v4l_subdev->ctrl_handler, V4L2_CID_ACAMERA_SET_DGAIN_LOG2);
++            ctrl = sensor_ctrl(p_ctx, V4L2_CID_ACAMERA_SET_DGAIN_LOG2);
+             if (ctrl)
+             {
+                v4l2_ctrl_s_ctrl(ctrl, p_ctx->dgain_log2);
+@@ -348,7 +360,7 @@ void sensor_init_v4l2_subdev( void **ctx, sensor_control_t *ctrl, const struct v
+         if(!sd) {
+             LOG( LOG_ERR, "sensor_init_v4l2_subdev: v4l2_subdev is NULL!" );
+         }
+-        LOG(LOG_INFO," sensor_init_v4l2_subdev: sd name=%s", sd->name);
++        LOG(LOG_INFO," sensor_init_v4l2_subdev: sd name=%s", sd ? sd->name : "(none)");
+         p_ctx->v4l_subdev = (struct v4l2_subdev *)sd; // Store the subdev handle
+         acamera_sbus_init( &p_ctx->sbus, sbus_i2c );
+ 
+-- 
+2.43.0
+

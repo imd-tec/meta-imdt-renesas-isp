@@ -1,0 +1,10 @@
+# Copyright (c) 2025 IMD Technologies
+
+DESCRIPTION = "Create an ISP SWUpdate image for the IMDT-V2H-SBC and IMDT-V2N-SBC"
+
+require recipes-support/swupdate/include/imdt-image-swu.inc
+
+inherit swupdate 
+
+# Dependencies to build before creating the SWUpdate image
+IMDT_BASE_IMAGE = "imdt-image-isp"
